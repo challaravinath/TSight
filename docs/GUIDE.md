@@ -197,16 +197,16 @@ Files where only **one person** has ever committed. If that person leaves, no on
 Click any author to see all their solo files, grouped by folder:
 
 ```
-▼ 👤 Arvind Venkataraman                    [149 solo files]
+▼ 👤 Developer A                              [149 solo files]
   
   📁 src/components/                         (45)
-     ├── AutomaticFrequencySubStepRenderer.tsx    →
-     ├── AutomaticScheduleSubStepRenderer.tsx     →
-     └── ScheduleFormRenderer.styles.ts           →
+     ├── ComponentOne.tsx                         →
+     ├── ComponentTwo.tsx                         →
+     └── ComponentThree.styles.ts                 →
   
   📁 src/types/                              (23)
-     ├── DataflowTypes.ts                         →
-     └── RefreshSettingsDayOfWeekPicker.tsx       →
+     ├── DataTypes.ts                             →
+     └── PickerTypes.tsx                          →
 ```
 
 Click any file to open its detail panel.
