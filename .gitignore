@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+packages/*/dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Runtime
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Package locks (optional - remove if you want to lock versions)
+package-lock.json
+
+# Temp files
+*.tmp
+.temp/
