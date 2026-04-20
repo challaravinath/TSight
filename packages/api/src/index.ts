@@ -16,7 +16,88 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT) || 3001;
+const HOST = process.env.HOST || '127.0.0.1';
+
+// ============================================================================
+// SECURITY: input validation & resource limits
+// ============================================================================
+
+// If set, every analyze target must resolve inside this directory.
+// In Docker we set this to /code; locally it can be left unset (the bind to
+// 127.0.0.1 + CORS allowlist already prevent remote exploitation).
+const WORKSPACE_ROOT = process.env.TSIGHT_WORKSPACE_ROOT
+  ? path.resolve(process.env.TSIGHT_WORKSPACE_ROOT)
+  : null;
+
+// Strict allowlist for git clone targets. Rules out ssh, scp-style and the
+// ext:: transport that historically allowed RCE via crafted URLs.
+const GITHUB_URL_RE = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?\/?$/;
+
+const CLONE_TIMEOUT_MS = 60_000;
+const CLONE_TMP_ROOT = path.join(os.tmpdir(), 'tsight-repos');
+const CLONE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+const ALLOWED_ORIGINS = (
+  process.env.TSIGHT_CORS_ORIGIN || 'http://localhost:3000,http://localhost:3001'
+)
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function validateProjectPath(input: unknown): string {
+  if (typeof input !== 'string' || input.length === 0 || input.includes('\0')) {
+    throw new Error('path must be a non-empty string');
+  }
+  const resolved = path.resolve(input);
+  if (!fs.existsSync(resolved)) {
+    throw new Error('Path does not exist');
+  }
+  if (!fs.statSync(resolved).isDirectory()) {
+    throw new Error('Path must be a directory');
+  }
+  if (WORKSPACE_ROOT) {
+    const real = fs.realpathSync(resolved);
+    const rootReal = fs.realpathSync(WORKSPACE_ROOT);
+    const rel = path.relative(rootReal, real);
+    if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
+      throw new Error('Path is outside the configured workspace root');
+    }
+  }
+  return resolved;
+}
+
+function validateGitHubUrl(input: unknown): string {
+  if (typeof input !== 'string' || !GITHUB_URL_RE.test(input)) {
+    throw new Error('url must be an https://github.com/{owner}/{repo} URL');
+  }
+  return input;
+}
+
+function clampInt(input: unknown, min: number, max: number, fallback: number): number {
+  const n = parseInt(String(input ?? ''), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function cleanupOldClones(): void {
+  try {
+    if (!fs.existsSync(CLONE_TMP_ROOT)) return;
+    const cutoff = Date.now() - CLONE_MAX_AGE_MS;
+    for (const name of fs.readdirSync(CLONE_TMP_ROOT)) {
+      const p = path.join(CLONE_TMP_ROOT, name);
+      try {
+        if (fs.statSync(p).mtimeMs < cutoff) {
+          fs.rmSync(p, { recursive: true, force: true });
+        }
+      } catch {
+        // best-effort cleanup
+      }
+    }
+  } catch {
+    // best-effort cleanup
+  }
+}
 
 // Serve static files in production (Docker)
 if (process.env.NODE_ENV === 'production') {
@@ -27,17 +108,22 @@ if (process.env.NODE_ENV === 'production') {
   }
 }
 
-app.use(cors());
-app.use(express.json());
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      // Same-origin or non-browser clients (curl, server-side) have no Origin.
+      if (!origin) return cb(null, true);
+      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      return cb(new Error('Origin not allowed'));
+    },
+  }),
+);
+app.use(express.json({ limit: '256kb' }));
 
 // State
 const analyzer = new Analyzer();
 let currentAnalysis: AnalysisResult | null = null;
 let currentProject: { path: string; name: string; status: string } | null = null;
-
-// Middleware
-app.use(cors());
-app.use(express.json());
 
 // ============================================================================
 // ROUTES
@@ -58,23 +144,20 @@ app.get('/api/health', (req, res) => {
  * Analyze a local folder
  */
 app.post('/api/analyze', async (req, res) => {
+  let projectPath: string;
   try {
-    const { path: projectPath } = req.body;
-    
-    if (!projectPath) {
-      return res.status(400).json({ success: false, error: 'path is required' });
-    }
-    
-    if (!fs.existsSync(projectPath)) {
-      return res.status(400).json({ success: false, error: 'Path does not exist' });
-    }
-    
+    projectPath = validateProjectPath(req.body?.path);
+  } catch (e) {
+    return res.status(400).json({ success: false, error: (e as Error).message });
+  }
+
+  try {
     currentProject = {
       path: projectPath,
       name: path.basename(projectPath),
       status: 'analyzing',
     };
-    
+
     // Run analysis
     currentAnalysis = await analyzer.analyze(projectPath);
     currentProject.status = 'ready';
@@ -97,39 +180,45 @@ app.post('/api/analyze', async (req, res) => {
  * Clone and analyze a GitHub repo
  */
 app.post('/api/analyze/github', async (req, res) => {
+  let url: string;
   try {
-    const { url } = req.body;
-    
-    if (!url) {
-      return res.status(400).json({ success: false, error: 'url is required' });
-    }
-    
-    // Extract repo name
-    const repoName = url.split('/').pop()?.replace('.git', '') || 'repo';
-    const tempDir = path.join(os.tmpdir(), 'tsight-repos', `${repoName}-${Date.now()}`);
-    
-    currentProject = {
-      path: tempDir,
-      name: repoName,
-      status: 'cloning',
-    };
-    
-    // Clone
+    url = validateGitHubUrl(req.body?.url);
+  } catch (e) {
+    return res.status(400).json({ success: false, error: (e as Error).message });
+  }
+
+  const repoName = url.replace(/\/$/, '').replace(/\.git$/, '').split('/').pop() || 'repo';
+  fs.mkdirSync(CLONE_TMP_ROOT, { recursive: true });
+  const tempDir = path.join(CLONE_TMP_ROOT, `${repoName}-${Date.now()}`);
+
+  currentProject = {
+    path: tempDir,
+    name: repoName,
+    status: 'cloning',
+  };
+
+  try {
     console.log(`📥 Cloning ${url}...`);
-    const git = simpleGit();
-    await git.clone(url, tempDir, ['--depth', '1']);
-    
+    const git = simpleGit({ timeout: { block: CLONE_TIMEOUT_MS } });
+    await Promise.race([
+      git.clone(url, tempDir, ['--depth', '1', '--no-tags', '--single-branch']),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('git clone timed out')), CLONE_TIMEOUT_MS),
+      ),
+    ]);
+
     // Analyze
     currentProject.status = 'analyzing';
     currentAnalysis = await analyzer.analyze(tempDir);
     currentProject.status = 'ready';
-    
+
     res.json({
       success: true,
       project: currentProject,
       stats: currentAnalysis.stats,
     });
   } catch (error) {
+    fs.rmSync(tempDir, { recursive: true, force: true });
     currentProject = null;
     res.status(500).json({
       success: false,
@@ -258,8 +347,9 @@ app.get('/api/search', (req, res) => {
     return res.status(404).json({ success: false, error: 'No analysis available' });
   }
   
-  const query = (req.query.q as string || '').toLowerCase();
-  
+  const rawQuery = typeof req.query.q === 'string' ? req.query.q : '';
+  const query = rawQuery.slice(0, 200).toLowerCase();
+
   if (!query) {
     return res.status(400).json({ success: false, error: 'Query parameter q is required' });
   }
@@ -994,7 +1084,7 @@ app.get('/api/complex-functions', (req, res) => {
     return res.status(404).json({ success: false, error: 'No analysis available' });
   }
   
-  const threshold = parseInt(req.query.threshold as string) || 15;
+  const threshold = clampInt(req.query.threshold, 1, 1000, 15);
   
   const complexFunctions = currentAnalysis.functions
     .filter((f: any) => f.complexity > threshold)
@@ -1116,7 +1206,7 @@ app.get('/api/git/churn', async (req, res) => {
     return res.status(404).json({ success: false, error: 'No analysis available' });
   }
   
-  const days = parseInt(req.query.days as string) || 90;
+  const days = clampInt(req.query.days, 1, 3650, 90);
   const since = new Date();
   since.setDate(since.getDate() - days);
   
@@ -1401,7 +1491,7 @@ app.get('/api/git/stale', async (req, res) => {
     return res.status(404).json({ success: false, error: 'No analysis available' });
   }
   
-  const months = parseInt(req.query.months as string) || 6;
+  const months = clampInt(req.query.months, 1, 120, 6);
   
   try {
     const git = simpleGit(currentProject.path);
@@ -1562,7 +1652,9 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.listen(PORT, () => {
+cleanupOldClones();
+
+app.listen(PORT, HOST, () => {
   console.log('');
   console.log('╔═══════════════════════════════════════════════════════════╗');
   console.log('║                                                           ║');
@@ -1575,7 +1667,11 @@ app.listen(PORT, () => {
   console.log('║                                                           ║');
   console.log('╚═══════════════════════════════════════════════════════════╝');
   console.log('');
-  console.log(`🚀 TSight running at http://localhost:${PORT}`);
+  const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
+  console.log(`🚀 TSight running at http://${displayHost}:${PORT}`);
+  if (WORKSPACE_ROOT) {
+    console.log(`🔒 Workspace root: ${WORKSPACE_ROOT}`);
+  }
   console.log('');
   if (process.env.NODE_ENV === 'production') {
     console.log('Mode: Production (Docker)');

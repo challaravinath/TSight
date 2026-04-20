@@ -31,6 +31,8 @@ EXPOSE 3000
 
 # Start command (serves both API and built web UI)
 ENV PORT=3000
+ENV HOST=0.0.0.0
 ENV NODE_ENV=production
+ENV TSIGHT_WORKSPACE_ROOT=/code
 
 CMD ["node", "packages/api/dist/index.js"]
