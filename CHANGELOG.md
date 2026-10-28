@@ -2,10 +2,11 @@
 
 All notable changes to TSight. Versions follow [semantic versioning](https://semver.org): a change to the snapshot format or the command line options that breaks existing use goes in a new major version.
 
-## Unreleased
+## 3.0.2 (2026-10-28)
 
 ### Changed
 - The GitHub Action and CI workflows use `actions/checkout` and `actions/setup-node` v7.
+- The packages depend on each other at `^3.0.2`.
 
 ## 3.0.1 (2026-10-28)
 

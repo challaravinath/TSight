@@ -1,6 +1,6 @@
 {
   "name": "tsight-monorepo",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "See how a TypeScript codebase fits together, using only facts from the code and its git history",
   "private": true,
   "engines": {

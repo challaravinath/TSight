@@ -1,6 +1,6 @@
 {
   "name": "tsight",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "Understand any TypeScript codebase in 30 seconds. No AI. No guessing. Just facts from your code.",
   "type": "module",
   "bin": {
@@ -18,8 +18,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tsight/api": "^3.0.1",
-    "@tsight/core": "^3.0.1"
+    "@tsight/api": "^3.0.2",
+    "@tsight/core": "^3.0.2"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

@@ -1,6 +1,6 @@
 {
   "name": "@tsight/core",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "TSight analysis engine: files, imports, complexity and git history for TypeScript projects",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
