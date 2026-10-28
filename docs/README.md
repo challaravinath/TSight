@@ -3,52 +3,120 @@
 Understand any TypeScript codebase in 30 seconds.
 No AI. No guessing. Just facts from your code.
 
-TSight reads a TypeScript or JavaScript project and its git history and shows you how it fits together: which files everything depends on, what breaks if you change something, who has worked on what, and where the tangled parts are. It runs on your machine and your code stays there.
+TSight reads a TypeScript or JavaScript project and its git history, then answers the questions you have on day one: which files are risky to change, who knows which parts, what nothing uses any more, and what a change is going to touch. Every number on screen is a link. Click it and you get the exact list it was counted from, with file paths and line numbers.
 
-![TSight overview of the excalidraw repository](images/overview.png)
+It runs on your machine. Your code stays there.
+
+![TSight overview](images/overview.png)
 
 ## Quick start
 
-You need Node.js 20 or newer.
-
-Mac or Linux:
+You need Node.js 20 or newer and git.
 
 ```bash
-./start.sh
+git clone https://github.com/challaravinath/TSight.git
+cd TSight
+npm install
+npm run build
+npx tsight /path/to/your/project
 ```
 
-Windows: double-click `start.bat`.
+The browser opens at http://localhost:4300 with the analysis. On Mac or Linux you can also run `./start.sh /path/to/your/project`, and on Windows `start.bat C:\path\to\project`. Both install, build and start in one go.
 
-The browser opens at http://localhost:3000. Click Analyze and give it the path to a project folder.
+## The command
 
-## What it shows
+```
+tsight [path]                 Open the UI for a folder (default: the current folder)
+tsight analyze [path]         Print the full analysis as JSON
+tsight diff [base]            What your working copy changes compared with base (default: main)
+tsight report [path]          Write one HTML file you can send to someone
+```
 
-Every number can be traced back to your code. This is how each one is worked out.
+Some examples:
 
-**Imports.** TSight resolves imports the way the TypeScript compiler does, using the nearest `tsconfig.json` for each file. That covers path aliases like `@/lib/utils`, ESM imports written as `./file.js`, re-exports, `import()` and `require()`. Workspace packages in a monorepo are matched to their source folders. The overview tells you how many project imports it could resolve. If some couldn't be found, it says so, because those links are missing from everything below.
+```bash
+tsight diff main                          # Markdown summary of your branch
+tsight diff main --fail-on new-cycle      # exit code 1 if the change adds a dependency loop
+tsight report . --base main --out report.html
+tsight analyze . --out snapshot.json
+```
 
-**Dependents and blast radius.** The files that import a file directly, and then the files that import those, and so on. Type-only imports are included, since changing a type can break the code that uses it.
+The report is a single file with the UI and the data inside it. It opens offline, from email or a shared drive, and loads nothing from the internet.
 
-**Hotspots.** Files that are complex and imported by many other files. The score is the file's total cyclomatic complexity times the number of source files that import it. For example, complexity 18 and 34 dependents gives 612.
+## What you see
 
-**Complexity.** Standard cyclomatic complexity: 1, plus 1 for each `if`, `?:`, loop, `case`, `catch`, `&&`, `||` and `??`. Every function, method, constructor and named arrow function gets its own score. An inline callback, like the one you pass to `map` or `useEffect`, counts toward the function it sits in. One at the top level of a file, like `forwardRef(...)` or a route handler, is scored on its own.
+**Overview.** Three answers at the top. The riskiest file to change, the code only one person has worked on, and the files nothing imports. Below that, a map of the codebase: each rectangle is a file, sized by lines and colored by the measure you pick. Click a folder to go inside it.
 
-**Cycles.** Groups of files that import each other in a loop, found with a strongly connected components search. Type-only imports and `import()` calls are left out, because they can't cause load-order problems at runtime.
+**Files.** Every file with its lines, complexity, dependents and recent commits. Sort by any column.
 
-**Duplicate files.** Files with the same code once whitespace and comments are ignored. Each group says whether the files are also identical byte for byte.
+**File page.** One file in detail: its functions, who changed it, what imports it, what it imports, the files that usually change together with it, and any code copied from or to it.
 
-**Which files are analyzed.** In a git repository, the files git tracks plus new files that aren't ignored, exactly as `git ls-files` lists them. Outside git, every file except those in `.gitignore` and common build folders such as `dist` and `node_modules`.
+**Dependencies.** Import loops, the most imported files, packages, and the entry points TSight found.
 
-**Structural twins.** Functions whose syntax is the same once you ignore variable names and literal values. These are usually copies. Each pair says whether the names and values match too.
+**People.** Who changed what, for all time or the last 6 or 3 months.
 
-**Files with no importers.** Source files that nothing imports and that no entry-point rule covers. Entry points come from `package.json` (`main`, `exports`, `bin` and scripts), `<script>` tags in HTML files, Next.js file conventions, tool config files and test files. TSight says "no importers found", not "unused", because a file can still be loaded in a way it can't see.
+**Changes.** What your branch touches compared with another branch. Same facts as `tsight diff`.
 
-**Git history.** Churn, ownership, bus factor and knowledge gaps, read from your local `.git` folder. No token or network access is needed. Names go through `.mailmap`, renamed files keep their history, and merge commits are skipped. If you analyze a subfolder, history is matched to that folder.
+## How each number is worked out
+
+**Imports.** Resolved the way the TypeScript compiler resolves them, with the nearest `tsconfig.json` for each file, including project references. That covers path aliases, `./file.js` written for ESM, re-exports, `import()`, `require()` and Vite's `import.meta.glob`. Workspace packages in a monorepo are matched to their source folders. The bar under the header says how many project imports resolved. Click the unresolved count to see the ones that didn't, because those links are missing from everything below.
+
+**Dependents and reach.** Dependents are the files that import a file directly, tests included. Reach follows imports backwards until nothing new turns up.
+
+**Complexity.** Cyclomatic complexity: 1, plus 1 for each `if`, `?:`, loop, `case`, `catch`, `&&`, `||` and `??`. An inline callback, like the one you pass to `map` or `useEffect`, counts toward the function it sits in. One at the top level of a file, like a route handler, is scored on its own.
+
+**Change hotspots.** Commits in the 90 days before the analysis times the highest function complexity in the file. A file with 41 recent commits and a function of complexity 133 scores 5,453. Busy and hard to follow is where bugs tend to come from.
+
+**Single author.** Files where every commit came from one person. If that person has no commits in the 6 months before the analysis, the file is marked as well.
+
+**Changed together.** Pairs of files that were changed in the same commit at least 5 times, where at least 80% of the commits to the less-changed file also touched the other. Commits touching more than 30 files are skipped, since those are usually formatting or renames. A pair is called hidden when neither file imports the other.
+
+**Dependency cycles.** Groups of files that import each other in a loop, from a strongly connected components search. Type-only imports and `import()` are left out, because they can't cause load-order problems.
+
+**Copied code.** Files or functions that are the same once whitespace and comments are ignored, and pairs of functions with the same structure where only names or literal values differ. Functions under 80 syntax nodes are not compared.
+
+**Files nothing imports.** Source files that no file imports and no entry-point rule covers. TSight says "nothing imports" rather than "unused", because a file can still be loaded in a way it can't see.
+
+**Entry points.** Files started by something other than an import: `package.json` (`main`, `exports`, `bin`, scripts), HTML `<script>` tags, `wrangler` config, test setup files, GitHub workflows, files in `public/`, Next.js conventions, tool config files and tests. If your project loads files some other way, list them in `tsight.config.json` at the project root:
+
+```json
+{
+  "entryPoints": ["src/plugins/*.ts", "scripts/**"]
+}
+```
+
+**Git history.** Read from the local `.git` folder in one pass, with no token or network access. Names go through `.mailmap`, files keep their history through renames, and merge commits are skipped. Commits from bots (authors ending in `[bot]`) don't count toward people or change pairs. In a shallow clone TSight says so, because authorship and co-change counts only cover the history that is there.
+
+**Which files are analyzed.** In a git repository, the files git tracks plus new files that aren't ignored. Outside git, every file except those in `.gitignore` and folders like `dist` and `node_modules`. Declaration files (`.d.ts`) are skipped.
+
+## Pull request reports
+
+Add this workflow to a repository and every pull request gets a comment with what it touches: how many files depend on the changed code, who wrote the lines being changed, files that usually change with these but were left out, and any new dependency loop. The comment is updated on each push.
+
+```yaml
+name: TSight
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: challaravinath/TSight@main
+        with:
+          fail-on: new-cycle   # optional
+```
+
+`fetch-depth: 0` matters. Without the history, TSight can't tell who wrote what. The same report is also written to the job summary, so it shows up for pull requests from forks too, where the comment can't be posted.
 
 ## What it doesn't do
 
 - It doesn't guess what a file is for from its name. Folders are shown as folders.
-- It doesn't produce a single health grade. You get the counts behind it instead.
+- It doesn't give a single health grade. You get the counts behind it instead.
 - It doesn't send your code anywhere.
 - It reads code, it doesn't run it. Anything decided at runtime, such as `import(someVariable)`, isn't followed.
 
@@ -61,9 +129,9 @@ docker run -p 127.0.0.1:3000:3000 -v "/path/to/your/code:/code" tsight
 
 Open http://localhost:3000 and enter a path under `/code`, for example `/code/my-project`.
 
-The command above only lets your own computer reach TSight. There is no login, so anyone who can reach it can read the analysis of everything under `/code`. If you still want to open it from another machine, publish the port with `-p 3000:3000` and add that machine's address for your server with `-e TSIGHT_ALLOWED_HOSTS=192.168.1.20`.
+The command above only lets your own computer reach TSight. There is no login, so anyone who can reach it can read the analysis of everything under `/code`. If you still want to open it from another machine, publish the port with `-p 3000:3000` and add that machine's address with `-e TSIGHT_ALLOWED_HOSTS=192.168.1.20`.
 
-## Running it from source
+## Working on TSight
 
 ```bash
 npm install
@@ -71,15 +139,18 @@ npm run build
 npm test
 ```
 
-During development, `npm run dev` starts the API on port 3001 and the web UI on port 3000.
+During development, `npm run dev` starts the API on port 3001 and the UI with hot reload on port 3000.
 
-To check the numbers against three real repositories pinned to exact commits, run `TSIGHT_CORPUS=1 npm test`. It clones about 150 MB the first time, so it isn't part of the normal test run.
+To check the numbers against three real repositories pinned to exact commits, run `TSIGHT_CORPUS=1 npm test`. It clones about 150 MB the first time, so it isn't part of the normal run.
 
-The code is split into three packages:
+The code is in four packages:
 
-- `packages/core`: the analysis engine. Everything that produces a number lives here, with tests in `packages/core/test`.
-- `packages/api`: a small Express server that calls core.
-- `packages/web`: the React UI.
+- `packages/core`: the analysis. Everything that produces a number lives here, with tests in `packages/core/test`.
+- `packages/api`: a small server that runs the analysis in a worker thread.
+- `packages/web`: the React UI. It reads one snapshot and computes the rest in the browser.
+- `packages/cli`: the `tsight` command.
+
+More detail on each screen is in the [guide](GUIDE.md).
 
 ## Contributing
 

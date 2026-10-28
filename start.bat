@@ -1,5 +1,9 @@
 @echo off
 :: Start TSight: installs what's needed, builds, and opens the browser.
+:: Usage: start.bat [folder to analyze]
+
+set "TARGET="
+if not "%~1"=="" set "TARGET=%~f1"
 
 cd /d "%~dp0"
 
@@ -34,25 +38,19 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo   [2/3] Building...
-call npm run build -w @tsight/core --silent
-if %ERRORLEVEL% NEQ 0 goto buildfailed
-call npm run build -w @tsight/api --silent
+call npm run build --silent >nul
 if %ERRORLEVEL% NEQ 0 goto buildfailed
 
-echo   [3/3] Starting. The UI is at http://localhost:3000 (API on 3001).
+echo   [3/3] Starting. Close this window to stop TSight.
 echo.
-
-start /B cmd /c "cd packages\api && npm start --silent"
-start /B cmd /c "cd packages\web && npm run dev --silent"
-
-timeout /t 5 /nobreak >nul
-start http://localhost:3000
-
-echo   TSight is running. Close this window to stop it.
-pause >nul
+if defined TARGET (
+    node packages\cli\dist\cli.js "%TARGET%"
+) else (
+    node packages\cli\dist\cli.js --pick
+)
 exit /b 0
 
 :buildfailed
-echo   Build failed.
+echo   Build failed. Run npm run build to see why.
 pause
 exit /b 1

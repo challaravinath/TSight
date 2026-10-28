@@ -1,5 +1,9 @@
 #!/bin/bash
 # Start TSight: installs what's needed, builds, and opens the browser.
+# Usage: ./start.sh [folder to analyze]
+
+TARGET="${1:-}"
+if [ -n "$TARGET" ]; then TARGET="$(cd "$TARGET" 2>/dev/null && pwd)" || { echo "  No such folder: $1"; exit 1; }; fi
 
 cd "$(dirname "$0")" || exit 1
 
@@ -25,27 +29,12 @@ echo "  [1/3] Installing dependencies (quick if nothing changed)..."
 npm install --no-audit --no-fund --loglevel=error || { echo "  npm install failed. Check your connection."; exit 1; }
 
 echo "  [2/3] Building..."
-npm run build -w @tsight/core --silent && npm run build -w @tsight/api --silent || { echo "  Build failed."; exit 1; }
+npm run build --silent > /dev/null || { echo "  Build failed. Run npm run build to see why."; exit 1; }
 
-echo "  [3/3] Starting. The UI is at http://localhost:3000 (API on 3001). Press Ctrl+C to stop."
-echo ""
-
-cleanup() {
-    kill $API_PID $WEB_PID 2>/dev/null
-    exit 0
-}
-trap cleanup INT TERM
-
-(cd packages/api && npm start --silent) &
-API_PID=$!
-(cd packages/web && npm run dev --silent) &
-WEB_PID=$!
-
-sleep 4
-if command -v open &> /dev/null; then
-    open http://localhost:3000
-elif command -v xdg-open &> /dev/null; then
-    xdg-open http://localhost:3000 >/dev/null 2>&1
+echo "  [3/3] Starting. Press Ctrl+C to stop."
+if [ -n "$TARGET" ]; then
+    exec node packages/cli/dist/cli.js "$TARGET"
+else
+    # No folder given: open the UI and pick one there.
+    exec node packages/cli/dist/cli.js --pick
 fi
-
-wait

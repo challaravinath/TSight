@@ -101,6 +101,9 @@ export function Overview({ m }: { m: Model }) {
       <section className="grid-3" aria-label="Structure">
         <div className="panel">
           <h2>Dependency cycles</h2>
+          {s.cycleGroups.length === 0 ? (
+            <p className="big-line">None. Every runtime import points one way.</p>
+          ) : (
           <p className="big-line">
             <Proof of={() => P.cycles(m)}>{plural(s.cycleGroups.length, 'group')}</Proof> of files import each other in a loop
             {s.cycleGroups.length > 0 && (
@@ -110,20 +113,27 @@ export function Overview({ m }: { m: Model }) {
             )}
             .
           </p>
+          )}
           <p className="note">Runtime imports only. Loops through type-only or dynamic imports are left out.</p>
           <a href={to.deps}>See dependencies</a>
         </div>
         <div className="panel">
           <h2>Copied code</h2>
+          {s.duplicates.length + s.twins.length === 0 ? (
+            <p className="big-line">None found.</p>
+          ) : (
           <p className="big-line">
             <Proof of={() => P.copies(m)}>{plural(s.duplicates.length + s.twins.length, 'place')}</Proof> where code appears more than once
             {copyParts(m).length ? `: ${copyParts(m).join(', ')}.` : '.'}
           </p>
+          )}
           <p className="note">Compared {plural(s.twinStats.functionsCompared, 'function')} of at least 80 syntax nodes.</p>
         </div>
         <div className="panel">
           <h2>Hidden coupling</h2>
-          {hasGit ? (
+          {hasGit && s.git!.coChanges.every((c) => !c.hidden) ? (
+            <p className="big-line">None. Files that change together also import each other.</p>
+          ) : hasGit ? (
             <>
               <p className="big-line">
                 <Proof of={() => P.coupling(m, { hidden: true })}>
@@ -220,8 +230,14 @@ function PeopleAnswer({ m }: { m: Model }) {
       </div>
       <div className="formula">
         <span>
-          Every commit came from one person. For <Proof of={() => P.soloFiles(m, 'inactive')}>{plural(quiet, 'file')}</Proof>, that person
-          has no commits in the last 6 months.
+          Every commit came from one person.{' '}
+          {quiet === 0 ? (
+            'All of those people have committed in the last 6 months.'
+          ) : (
+            <>
+              For <Proof of={() => P.soloFiles(m, 'inactive')}>{plural(quiet, 'file')}</Proof>, that person has no commits in the last 6 months.
+            </>
+          )}
         </span>
       </div>
       <div className="next">
@@ -254,7 +270,13 @@ function SafeAnswer({ m }: { m: Model }) {
         </span>
       </div>
       <div className="next">
-        <Proof of={() => P.noImporters(m, true)}>{plural(tests, 'more file')}</Proof> {tests === 1 ? 'is' : 'are'} only imported by tests.
+        {tests === 0 ? (
+          'No source file is imported only by tests.'
+        ) : (
+          <>
+            <Proof of={() => P.noImporters(m, true)}>{plural(tests, 'more file')}</Proof> {tests === 1 ? 'is' : 'are'} only imported by tests.
+          </>
+        )}
       </div>
     </div>
   );

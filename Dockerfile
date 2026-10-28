@@ -4,7 +4,7 @@
 
 FROM node:22-alpine
 
-# git is needed for the history views (churn, ownership, bus factor).
+# git is needed for the history views (people, hotspots, changes).
 RUN apk add --no-cache git \
  && git config --system --add safe.directory '*'
 
@@ -14,11 +14,13 @@ COPY package.json package-lock.json ./
 COPY packages/core/package.json ./packages/core/
 COPY packages/api/package.json ./packages/api/
 COPY packages/web/package.json ./packages/web/
+COPY packages/cli/package.json ./packages/cli/
 RUN npm ci
 
 COPY packages/core ./packages/core
 COPY packages/api ./packages/api
 COPY packages/web ./packages/web
+COPY packages/cli ./packages/cli
 RUN npm run build
 
 ENV PORT=3000

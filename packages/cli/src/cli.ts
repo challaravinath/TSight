@@ -25,6 +25,7 @@ Usage
   tsight [path]                 Open the TSight UI for a folder (default: the current folder)
       --port <n>                Port to use (default 4300)
       --no-open                 Do not open a browser
+      --pick                    Start without analyzing and choose a folder in the browser
 
   tsight analyze [path]         Write the analysis snapshot as JSON
       --out <file>              Write to a file instead of standard output
@@ -109,6 +110,7 @@ async function main() {
     options: {
       port: { type: 'string' },
       'no-open': { type: 'boolean' },
+      pick: { type: 'boolean' },
       out: { type: 'string' },
       path: { type: 'string' },
       head: { type: 'string' },
@@ -127,7 +129,7 @@ async function main() {
     if (!fs.existsSync(dir)) fail(`No such folder: ${dir}`);
     const port = values.port ? Number(values.port) : 4300;
     if (!Number.isInteger(port) || port < 0 || port > 65535) fail('--port must be a number between 0 and 65535');
-    const server = createServer({ port, webDir: webDir(), initialPath: dir, version: VERSION, log: (m) => process.stderr.write(`${m}\n`) });
+    const server = createServer({ port, webDir: webDir(), initialPath: values.pick ? undefined : dir, version: VERSION, log: (m) => process.stderr.write(`${m}\n`) });
     const { url } = await server.start();
     process.stderr.write(`\nTSight ${VERSION} is running at ${url}\nPress Ctrl+C to stop.\n\n`);
     if (!values['no-open']) openBrowser(url);
