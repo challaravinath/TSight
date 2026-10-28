@@ -46,3 +46,7 @@ Every pull request gets a comment from TSight itself, showing what the change to
 3. The release workflow runs the tests, submits the three npm packages to npm's staging area, and creates the GitHub release.
 4. A maintainer approves the staged packages on npmjs.com under Staged Packages, in the order `@tsight/core`, `@tsight/api`, `tsight`. Nothing reaches users before that.
 
+
+### Testing the release process
+
+A version with a hyphen, like `3.0.2-rc.0`, is a test release. It goes to npm under the `next` label instead of `latest`, so people running `npx tsight` keep getting the current version, and the GitHub release is marked as a pre-release. It doesn't need a changelog section. Tag it from a branch so `main` keeps the real version, and install it with `npx tsight@next`.
