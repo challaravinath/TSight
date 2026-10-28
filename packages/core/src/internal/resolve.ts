@@ -28,6 +28,26 @@ interface ConfigEntry {
   options: ts.CompilerOptions;
   cache: ts.ModuleResolutionCache;
   pathPatterns: string[];
+  fileNames: Set<string>; // files the config includes, as fileKey()
+  references: string[]; // absolute paths of referenced tsconfig files
+}
+
+/** Specifiers that can never be npm package names, so they must be project aliases. */
+const ALIAS_LIKE = /^(@\/|~\/|~$|#)/;
+
+/** Resolve symlinks so paths compare equal however the folder was reached. */
+export function realPath(p: string): string {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return p;
+  }
+}
+
+/** A comparable key for an absolute path (case-insensitive on Windows). */
+function fileKey(p: string): string {
+  const posix = toPosix(path.resolve(p));
+  return process.platform === 'win32' ? posix.toLowerCase() : posix;
 }
 
 const DEFAULT_OPTIONS: ts.CompilerOptions = {
@@ -48,14 +68,14 @@ const DEFAULT_OPTIONS: ts.CompilerOptions = {
 export class ModuleResolver {
   private readonly root: string;
   private readonly analyzed: Set<string>;
-  private readonly configByDir = new Map<string, ConfigEntry>();
+  private readonly nearestByDir = new Map<string, string | null>();
   private readonly configByPath = new Map<string, ConfigEntry>();
   private readonly workspaces: Map<string, string>; // package name -> absolute dir
   private readonly host: ts.ModuleResolutionHost;
 
   constructor(root: string, analyzedAbsPaths: Iterable<string>) {
-    this.root = path.resolve(root);
-    this.analyzed = new Set(Array.from(analyzedAbsPaths, (p) => path.resolve(p)));
+    this.root = realPath(path.resolve(root));
+    this.analyzed = new Set(Array.from(analyzedAbsPaths, (p) => realPath(path.resolve(p))));
     this.workspaces = findWorkspacePackages(this.root);
     this.host = {
       fileExists: ts.sys.fileExists,
@@ -78,70 +98,122 @@ export class ModuleResolver {
 
   resolve(specifier: string, fromAbs: string): Resolution {
     const cleanSpec = specifier.split('?')[0];
+    if (cleanSpec !== specifier) return { kind: 'asset' }; // ./x.svg?raw, ./worker.ts?worker
     const ext = path.extname(cleanSpec).toLowerCase();
     const isRelative = cleanSpec.startsWith('.') || path.isAbsolute(cleanSpec);
-
-    if (cleanSpec !== specifier || (ext && ASSET_EXTENSIONS.has(ext))) {
-      return { kind: 'asset' };
-    }
+    const isBare = !isRelative;
 
     const config = this.configFor(fromAbs);
     const result = ts.resolveModuleName(cleanSpec, fromAbs, config.options, this.host, config.cache);
     const resolved = result.resolvedModule;
 
     if (resolved) {
-      const target = path.resolve(resolved.resolvedFileName);
+      const target = realPath(path.resolve(resolved.resolvedFileName));
       const kind = this.classifyTarget(target);
-      if (kind) return { kind, target, resolvedBy: kind === 'internal' ? 'typescript' : undefined };
+      if (kind === 'internal') return { kind, target, resolvedBy: 'typescript' };
+      if (kind === 'asset') return { kind };
+      if (kind === 'excluded') {
+        // Built output or a declaration file: prefer the source file next to it.
+        const source = this.sourceFor(target);
+        if (source) return { kind: 'internal', target: source, resolvedBy: 'typescript' };
+      }
+      if (isBare) {
+        const ws = this.resolveWorkspace(cleanSpec);
+        if (ws) return { kind: 'internal', target: ws, resolvedBy: 'workspace' };
+      }
+      return { kind, target };
     }
 
-    if (!isRelative) {
+    if (ext && ASSET_EXTENSIONS.has(ext)) return { kind: 'asset' };
+    if (isBare) {
       const ws = this.resolveWorkspace(cleanSpec);
       if (ws) return { kind: 'internal', target: ws, resolvedBy: 'workspace' };
     }
-
     if (isRelative) return { kind: 'unresolved' };
     if (cleanSpec.startsWith('node:') || BUILTINS.has(cleanSpec.split('/')[0])) return { kind: 'external' };
-    if (this.matchesPathAlias(cleanSpec, config) || this.matchesWorkspaceName(cleanSpec)) {
+    if (
+      ALIAS_LIKE.test(cleanSpec) ||
+      this.matchesPathAlias(cleanSpec, config) ||
+      this.matchesWorkspaceName(cleanSpec)
+    ) {
       return { kind: 'unresolved' };
     }
     // A bare specifier that is not an alias: a package, installed or not.
     return { kind: 'external' };
   }
 
-  private classifyTarget(target: string): ImportKind | null {
+  /** For a .d.ts or an unanalyzed .js, the analyzed source file with the same name, if any. */
+  private sourceFor(target: string): string | null {
+    const base = target.replace(/\.d\.[cm]?ts$/i, '').replace(/\.[cm]?[jt]sx?$/i, '');
+    for (const c of withExtensions(base)) {
+      if (this.analyzed.has(c)) return c;
+    }
+    return null;
+  }
+
+  private classifyTarget(target: string): ImportKind {
     const posix = toPosix(target);
     if (posix.includes('/node_modules/')) return 'external';
     if (this.analyzed.has(target)) return 'internal';
-    const ext = path.extname(target).toLowerCase();
-    if (ASSET_EXTENSIONS.has(ext)) return 'asset';
-    if (CODE_EXTENSIONS.includes(ext) || /\.d\.[cm]?ts$/.test(target)) return 'excluded';
+    const lower = target.toLowerCase();
+    if (/\.d\.[cm]?ts$/.test(lower)) return 'excluded';
+    const ext = path.extname(lower);
+    if (CODE_EXTENSIONS.includes(ext)) return 'excluded';
     return 'asset';
   }
 
+  /**
+   * The tsconfig that governs a file: the nearest tsconfig.json, or, when
+   * that file only lists `references` (the solution style Vite and others
+   * use), the referenced config whose files include this one.
+   */
   private configFor(fileAbs: string): ConfigEntry {
     const dir = path.dirname(fileAbs);
-    const cached = this.configByDir.get(dir);
-    if (cached) return cached;
+    let nearest = this.nearestByDir.get(dir);
+    if (nearest === undefined) {
+      nearest = findNearestTsconfig(dir);
+      this.nearestByDir.set(dir, nearest);
+    }
+    const entry = this.load(nearest);
+    if (!nearest || entry.fileNames.has(fileKey(fileAbs)) || entry.references.length === 0) return entry;
 
-    const configPath = findNearestTsconfig(dir);
-    let entry = configPath ? this.configByPath.get(configPath) : this.configByPath.get('');
+    const seen = new Set<string>([nearest]);
+    const queue = [...entry.references];
+    while (queue.length > 0) {
+      const ref = queue.shift()!;
+      if (seen.has(ref)) continue;
+      seen.add(ref);
+      const child = this.load(ref);
+      if (child.fileNames.has(fileKey(fileAbs))) return child;
+      queue.push(...child.references);
+    }
+    return entry;
+  }
+
+  private load(configPath: string | null): ConfigEntry {
+    const key = configPath ?? '';
+    let entry = this.configByPath.get(key);
     if (!entry) {
       entry = this.loadConfig(configPath);
-      this.configByPath.set(configPath ?? '', entry);
+      this.configByPath.set(key, entry);
     }
-    this.configByDir.set(dir, entry);
     return entry;
   }
 
   private loadConfig(configPath: string | null): ConfigEntry {
     let options: ts.CompilerOptions = { ...DEFAULT_OPTIONS };
+    let fileNames = new Set<string>();
+    let references: string[] = [];
     if (configPath) {
       const parsed = ts.getParsedCommandLineOfConfigFile(configPath, {}, {
         ...ts.sys,
         onUnRecoverableConfigFileDiagnostic: () => {},
       });
-      if (parsed) options = { ...parsed.options };
+      if (parsed) {
+        options = { ...parsed.options };
+        fileNames = new Set(parsed.fileNames.map((f) => fileKey(f)));
+        references = (parsed.projectReferences ?? []).map((r) => path.resolve(ts.resolveProjectReferencePath(r)));
+      }
     }
     // We need every code file to be resolvable, whatever the project emits.
     options.allowJs = true;
@@ -155,6 +227,8 @@ export class ModuleResolver {
       options,
       cache,
       pathPatterns: Object.keys(options.paths ?? {}),
+      fileNames,
+      references,
     };
   }
 
@@ -199,7 +273,7 @@ export class ModuleResolver {
 
 function withExtensions(base: string): string[] {
   const stripped = base.replace(/\.[cm]?js$/, '');
-  return CODE_EXTENSIONS.map((ext) => path.resolve(stripped + ext));
+  return CODE_EXTENSIONS.map((ext) => realPath(path.resolve(stripped + ext)));
 }
 
 function packageEntryCandidates(dir: string): string[] {
@@ -208,7 +282,7 @@ function packageEntryCandidates(dir: string): string[] {
     const fields = [pkg.source, pkg.types, pkg.typings, pkg.module, pkg.main].filter(
       (v: unknown): v is string => typeof v === 'string',
     );
-    return fields.map((f) => path.resolve(dir, f));
+    return fields.map((f) => realPath(path.resolve(dir, f)));
   } catch {
     return [];
   }
@@ -284,30 +358,38 @@ function readWorkspacePatterns(dir: string): string[] {
   }
 }
 
+/** Expand a workspaces glob such as packages/*, packages/plugin-* or apps/** to folders. */
 function expandWorkspacePattern(base: string, pattern: string): string[] {
   if (pattern.startsWith('!')) return [];
-  const clean = pattern.replace(/\/+$/, '');
-  if (!clean.includes('*')) return [path.resolve(base, clean)];
-
-  const starIndex = clean.indexOf('*');
-  const fixed = clean.slice(0, starIndex).replace(/\/+$/, '');
-  const recursive = clean.includes('**');
-  const start = path.resolve(base, fixed);
+  const segments = pattern.replace(/^\.\//, '').replace(/\/+$/, '').split('/').filter(Boolean);
   const out: string[] = [];
-  const visit = (dir: string, depth: number): void => {
+  const toRegex = (seg: string) => new RegExp('^' + seg.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*') + '$');
+
+  const walk = (dir: string, i: number, depth: number): void => {
+    if (i === segments.length) {
+      out.push(dir);
+      return;
+    }
+    const seg = segments[i];
+    if (!seg.includes('*')) {
+      walk(path.join(dir, seg), i + 1, depth);
+      return;
+    }
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
-    for (const e of entries) {
-      if (!e.isDirectory() || e.name === 'node_modules' || e.name.startsWith('.')) continue;
-      const child = path.join(dir, e.name);
-      out.push(child);
-      if (recursive && depth < 3) visit(child, depth + 1);
+    const dirs = entries.filter((e) => e.isDirectory() && e.name !== 'node_modules' && !e.name.startsWith('.'));
+    if (seg === '**') {
+      walk(dir, i + 1, depth); // zero folders
+      if (depth < 4) for (const e of dirs) walk(path.join(dir, e.name), i, depth + 1);
+      return;
     }
+    const re = toRegex(seg);
+    for (const e of dirs) if (re.test(e.name)) walk(path.join(dir, e.name), i + 1, depth);
   };
-  visit(start, 0);
+  walk(path.resolve(base), 0, 0);
   return out;
 }

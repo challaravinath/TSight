@@ -340,6 +340,8 @@ export interface AnalysisResult {
   entryPoints: EntryPoint[];
   /** Export names per file (declared in that file, not re-exported), used for unused-export checks. */
   exportsByFile: Record<string, string[]>;
+  /** Line of each export's declaration, per file. */
+  exportLines: Record<string, Record<string, number>>;
 
   mentalModel: MentalModel;
 

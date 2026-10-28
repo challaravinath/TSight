@@ -51,7 +51,7 @@ const CASES: Case[] = [
     commit: 'afdac65e0f80c0ccf9e8909da97c411567908b57',
     subfolder: 'packages/zod/src',
     probe: 'v4/core/util.ts',
-    expected: { sourceFiles: 134, testFiles: 198, internal: 769, projectImports: 769, unresolved: 0, cycleGroups: 1, duplicates: 0, twinPairs: 9, probeDirect: 84, probeTotal: 239 },
+    expected: { sourceFiles: 134, testFiles: 198, internal: 769, projectImports: 769, unresolved: 0, cycleGroups: 1, duplicates: 0, twinPairs: 11, probeDirect: 84, probeTotal: 239 },
   },
   {
     name: 'excalidraw',
@@ -59,7 +59,7 @@ const CASES: Case[] = [
     commit: '14bb42edee3d6fee6be264e3ee78670b3b9cee79',
     subfolder: '',
     probe: 'packages/common/src/utils.ts',
-    expected: { sourceFiles: 548, testFiles: 161, internal: 4272, projectImports: 4275, unresolved: 3, cycleGroups: 7, duplicates: 0, twinPairs: 4, probeDirect: 6, probeTotal: 560 },
+    expected: { sourceFiles: 548, testFiles: 161, internal: 4272, projectImports: 4275, unresolved: 3, cycleGroups: 7, duplicates: 0, twinPairs: 5, probeDirect: 6, probeTotal: 560 },
   },
 ];
 

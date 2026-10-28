@@ -13,6 +13,7 @@ export function parseFiles(files: DiscoveredFile[]): Array<{ sf: SourceFile; fil
       jsx: ts.JsxEmit.Preserve,
       allowJs: true,
       noEmit: true,
+      noResolve: true,
     },
     skipAddingFilesFromTsConfig: true,
     skipFileDependencyResolution: true,

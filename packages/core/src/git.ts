@@ -10,6 +10,8 @@
  *   git would have to download old file contents to detect renames.
  * - Merge commits are skipped; their changes are counted in the commits
  *   that were merged.
+ * - When a file is deleted and a new one is later created at the same
+ *   path, the new file does not inherit the old one's history.
  * - Only files that exist in the analysis are reported.
  */
 import { execFile } from 'child_process';
@@ -65,6 +67,7 @@ export async function readGitHistory(root: string): Promise<GitHistory> {
     '-c', 'core.quotepath=off',
     'log',
     '--no-merges',
+    '--topo-order',
     renamesFollowed ? '-M' : '--no-renames',
     '--name-status',
     '-z',
@@ -80,8 +83,11 @@ export async function readGitHistory(root: string): Promise<GitHistory> {
 /** Parse the output of the log command above. Exported for tests. */
 export function parseLog(raw: string): GitCommit[] {
   const commits: GitCommit[] = [];
-  const currentName = new Map<string, string>(); // path at that time -> current path
-  const resolveName = (p: string) => currentName.get(p) ?? p;
+  // Path at that point in history -> the file's current path, or null when
+  // the file that had this path was later deleted (so its history must not
+  // be credited to a new file created at the same path).
+  const currentName = new Map<string, string | null>();
+  const resolveName = (p: string): string | null => (currentName.has(p) ? currentName.get(p)! : p);
 
   for (const record of raw.split('\x1e')) {
     if (!record) continue;
@@ -102,12 +108,18 @@ export function parseLog(raw: string): GitCommit[] {
         const newPath = fields[++i];
         if (newPath === undefined) break;
         const current = resolveName(newPath);
-        files.add(current);
+        if (current !== null) files.add(current);
         if (code === 'R' && oldPath !== undefined) currentName.set(oldPath, current);
       } else {
         const p = fields[++i];
         if (p === undefined) break;
-        files.add(resolveName(p));
+        if (code === 'D') {
+          // Older commits on this path belong to the deleted file.
+          currentName.set(p, null);
+          continue;
+        }
+        const current = resolveName(p);
+        if (current !== null) files.add(current);
       }
     }
 

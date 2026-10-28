@@ -177,6 +177,7 @@ export function resolutionStats(imports: ImportInfo[], tsconfigs: string[]): Res
 
 export function extractExternalPackages(imports: ImportInfo[]): PackageUsage[] {
   const packageMap = new Map<string, PackageUsage>();
+  const seen = new Map<string, Set<string>>();
 
   for (const imp of imports) {
     if (imp.kind !== 'external') continue;
@@ -188,10 +189,17 @@ export function extractExternalPackages(imports: ImportInfo[]): PackageUsage[] {
       pkgName = pkgName.split('/')[0];
     }
 
-    if (!packageMap.has(pkgName)) packageMap.set(pkgName, { name: pkgName, importCount: 0, usedIn: [] });
+    if (!packageMap.has(pkgName)) {
+      packageMap.set(pkgName, { name: pkgName, importCount: 0, usedIn: [] });
+      seen.set(pkgName, new Set());
+    }
     const pkg = packageMap.get(pkgName)!;
     pkg.importCount++;
-    if (!pkg.usedIn.includes(imp.from)) pkg.usedIn.push(imp.from);
+    const files = seen.get(pkgName)!;
+    if (!files.has(imp.from)) {
+      files.add(imp.from);
+      pkg.usedIn.push(imp.from);
+    }
   }
 
   return Array.from(packageMap.values()).sort((a, b) => b.importCount - a.importCount);

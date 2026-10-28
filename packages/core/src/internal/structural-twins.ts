@@ -2,7 +2,6 @@ import { ts } from 'ts-morph';
 import * as crypto from 'crypto';
 import type { StructuralTwin, SimilarityCriterion, StructuralTwinReport, FileRole } from '../types.js';
 import type { UnitRecord } from './complexity.js';
-import { isUnit } from './complexity.js';
 
 /** Functions smaller than this many syntax nodes are skipped (one-line getters are often identical on purpose). */
 export const MIN_TWIN_NODES = 80;
@@ -66,12 +65,12 @@ function shapeOf(u: UnitRecord, sf: ts.SourceFile): Shape {
   let statements = 0;
 
   const visit = (node: ts.Node): void => {
-    // A named helper inside the function is its own unit; keep its place but not its body.
-    if (node !== u.node && isUnit(node)) {
-      kinds.push(-1);
-      return;
-    }
+    // Nested functions (a React handler, a helper) are part of the comparison.
     kinds.push(node.kind);
+    // Facts stored on the node rather than as child nodes.
+    if (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) kinds.push(1000 + node.operator);
+    if (ts.isTypeOperatorNode(node)) kinds.push(1000 + node.operator);
+    if (ts.isVariableDeclarationList(node)) kinds.push(2000 + (node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const | ts.NodeFlags.Using | ts.NodeFlags.AwaitUsing)));
     if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) {
       names.push(node.text);
     } else if (

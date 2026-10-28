@@ -1,17 +1,19 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 import ignore, { type Ignore } from 'ignore';
 import type { FileRole } from '../types.js';
 
 export const CODE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
 
-// Directories that are never source, whether or not .gitignore lists them.
-// Matched against a whole path segment, never a substring.
+// Never source, even when committed.
+const NEVER_SOURCE_DIRS = new Set(['node_modules', '.git', '.hg', '.svn']);
+
+// Outside a git repository there is no list of tracked files, so these
+// common build and cache folders are skipped as well. Matched against a
+// whole path segment, never a substring.
 const ALWAYS_SKIPPED_DIRS = new Set([
-  'node_modules',
-  '.git',
-  '.hg',
-  '.svn',
+  ...NEVER_SOURCE_DIRS,
   'dist',
   'build',
   'out',
@@ -60,15 +62,68 @@ interface IgnoreScope {
 }
 
 /**
- * Walk the root and return every code file that is not ignored.
- * Honours .gitignore files at every level, skips symlinked directories,
- * and never matches path fragments (a folder called "builders" is kept).
+ * Every code file under the root that is part of the project.
+ *
+ * Inside a git repository this is exactly what git sees: tracked files
+ * plus untracked files that are not ignored (`git ls-files`), so every
+ * .gitignore rule applies the way git applies it. Elsewhere the folder is
+ * walked, .gitignore files are honoured, and common build folders are
+ * skipped by whole name (a folder called "builders" is kept).
  */
 export function discoverFiles(root: string): Discovery {
+  const abs = path.resolve(root);
+  const fromGit = gitListedFiles(abs);
+  const rels = fromGit ?? walkFiles(abs);
+
   const files: DiscoveredFile[] = [];
   const packageJsons: string[] = [];
   const htmlFiles: string[] = [];
+  for (const rel of rels) {
+    const segments = rel.split('/');
+    if (segments.slice(0, -1).some((s) => NEVER_SOURCE_DIRS.has(s))) continue;
+    const name = segments[segments.length - 1];
+    if (name === 'package.json') packageJsons.push(rel);
+    else if (name.endsWith('.html')) htmlFiles.push(rel);
+    else if (!DECLARATION_RE.test(name) && CODE_EXTENSIONS.includes(path.extname(name).toLowerCase())) {
+      files.push({ abs: path.join(abs, ...segments), rel, role: fileRole(rel) });
+    }
+  }
+  return { files, packageJsons, htmlFiles };
+}
 
+/** Files git tracks or would track under `root`, relative to it. Null outside a repository. */
+function gitListedFiles(root: string): string[] | null {
+  let out: string;
+  try {
+    out = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '.'], {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024 * 512,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    });
+  } catch {
+    return null;
+  }
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const rel of out.split('\0')) {
+    if (!rel || seen.has(rel)) continue;
+    seen.add(rel);
+    // Skip files deleted from the working tree, submodules and symlinks.
+    try {
+      if (!fs.lstatSync(path.join(root, rel)).isFile()) continue;
+    } catch {
+      continue;
+    }
+    result.push(rel);
+  }
+  // An ignored folder inside a repository lists nothing: walk it instead.
+  return result.length > 0 ? result.sort() : null;
+}
+
+function walkFiles(root: string): string[] {
+  const result: string[] = [];
   const walk = (absDir: string, relDir: string, scopes: IgnoreScope[]): void => {
     let entries: fs.Dirent[];
     try {
@@ -76,43 +131,20 @@ export function discoverFiles(root: string): Discovery {
     } catch {
       return;
     }
-
     const local = readGitignore(absDir);
     const activeScopes = local ? [...scopes, { base: relDir, ig: local }] : scopes;
-
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-
     for (const entry of entries) {
       const rel = relDir ? `${relDir}/${entry.name}` : entry.name;
-      const abs = path.join(absDir, entry.name);
       const isDir = entry.isDirectory();
-
       if (isDir && ALWAYS_SKIPPED_DIRS.has(entry.name)) continue;
       if (isIgnored(activeScopes, rel, isDir)) continue;
-
-      if (isDir) {
-        walk(abs, rel, activeScopes);
-        continue;
-      }
-      if (!entry.isFile()) continue; // symlinks and sockets are skipped
-
-      if (entry.name === 'package.json') {
-        packageJsons.push(rel);
-        continue;
-      }
-      if (entry.name.endsWith('.html')) {
-        htmlFiles.push(rel);
-        continue;
-      }
-      if (DECLARATION_RE.test(entry.name)) continue;
-      if (!CODE_EXTENSIONS.includes(path.extname(entry.name).toLowerCase())) continue;
-
-      files.push({ abs, rel, role: fileRole(rel) });
+      if (isDir) walk(path.join(absDir, entry.name), rel, activeScopes);
+      else if (entry.isFile()) result.push(rel); // symlinks and sockets are skipped
     }
   };
-
-  walk(path.resolve(root), '', []);
-  return { files, packageJsons, htmlFiles };
+  walk(root, '', []);
+  return result;
 }
 
 function readGitignore(absDir: string): Ignore | null {

@@ -272,10 +272,6 @@ export function unusedExports(result: AnalysisResult) {
     for (const name of imp.imports) used.get(imp.to)!.add(name);
   }
   const entries = new Set(result.entryPoints.map((e) => e.file));
-  const lines = new Map<string, number>();
-  for (const el of [...result.classes, ...result.functions, ...result.interfaces]) {
-    lines.set(`${el.file}\u0000${el.name}`, el.line);
-  }
 
   const out: Array<{ file: string; name: string; type: string; line: number }> = [];
   let totalExports = 0;
@@ -291,7 +287,7 @@ export function unusedExports(result: AnalysisResult) {
     }
     for (const name of names) {
       if (u?.has(name)) continue;
-      out.push({ file, name, type: 'export', line: lines.get(`${file}\u0000${name}`) ?? 1 });
+      out.push({ file, name, type: 'export', line: result.exportLines[file]?.[name] ?? 1 });
     }
   }
   return {

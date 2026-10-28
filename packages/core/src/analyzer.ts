@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import type { AnalysisResult, CodeIssue } from './types.js';
 import { discoverFiles, toPosix } from './internal/discovery.js';
 import { parseFiles } from './internal/project.js';
-import { ModuleResolver } from './internal/resolve.js';
+import { ModuleResolver, realPath } from './internal/resolve.js';
 import {
   extractFiles,
   extractFolders,
@@ -37,10 +37,12 @@ export interface AnalyzeOptions {
 export async function analyzeProject(projectPath: string, options: AnalyzeOptions = {}): Promise<AnalysisResult> {
   const log = options.log ?? (() => {});
   const startTime = Date.now();
-  const root = path.resolve(projectPath);
-  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+  const given = path.resolve(projectPath);
+  if (!fs.existsSync(given) || !fs.statSync(given).isDirectory()) {
     throw new Error(`Not a directory: ${projectPath}`);
   }
+  // Work on the real path so symlinked folders (macOS /tmp, a linked checkout) compare equal.
+  const root = realPath(given);
 
   const discovery = discoverFiles(root);
   log(`Found ${discovery.files.length} code files`);
@@ -51,9 +53,9 @@ export async function analyzeProject(projectPath: string, options: AnalyzeOption
   const files = extractFiles(parsed);
   const folders = extractFolders(files);
   const languages = calculateLanguages(files);
-  const classes = extractClasses(parsed);
-  const interfaces = extractInterfaces(parsed);
-  const { exportsByFile, exportedLocalNames } = extractExports(parsed);
+  const { exportsByFile, exportLines, exportedLocalNames } = extractExports(parsed);
+  const classes = extractClasses(parsed, exportedLocalNames);
+  const interfaces = extractInterfaces(parsed, exportedLocalNames);
 
   const units = parsed.flatMap(({ sf, rel, role }) =>
     collectUnits(sf.compilerNode, rel, exportedLocalNames.get(rel) ?? new Set()).map((u) => ({ ...u, sf: sf.compilerNode, role })),
@@ -102,6 +104,7 @@ export async function analyzeProject(projectPath: string, options: AnalyzeOption
     externalPackages,
     entryPoints,
     exportsByFile,
+    exportLines,
     mentalModel,
     issues,
     duplicates,

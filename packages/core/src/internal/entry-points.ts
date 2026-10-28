@@ -78,10 +78,13 @@ export function findEntryPoints(
     }
     const dir = path.posix.dirname(htmlRel) === '.' ? '' : path.posix.dirname(htmlRel);
     for (const m of html.matchAll(/<script[^>]*\ssrc=["']([^"']+)["']/g)) {
-      const src = m[1];
+      const src = m[1].split('?')[0];
       if (/^(https?:)?\/\//.test(src)) continue;
-      const rel = src.startsWith('/') ? src.slice(1) : path.posix.normalize(dir ? `${dir}/${src}` : src);
-      add(rel, `<script> in ${htmlRel}`);
+      // Tools like Vite treat the HTML file's folder as the site root, so
+      // "/src/main.tsx" in apps/web/index.html means apps/web/src/main.tsx.
+      const fromHtmlDir = path.posix.normalize(dir ? `${dir}/${src.replace(/^\//, '')}` : src.replace(/^\//, ''));
+      add(fromHtmlDir, `<script> in ${htmlRel}`);
+      if (src.startsWith('/')) add(src.slice(1), `<script> in ${htmlRel}`);
     }
   }
 

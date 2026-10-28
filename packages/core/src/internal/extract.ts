@@ -28,11 +28,18 @@ export function extractFiles(parsed: Parsed[]): FileInfo[] {
       name: path.posix.basename(rel),
       extension: path.posix.extname(rel),
       folder: folder === '.' ? '' : folder,
-      lines: text.length === 0 ? 0 : text.split(/\r\n|\r|\n/).length,
+      lines: countLines(text),
       size: text.length,
       role,
     };
   });
+}
+
+/** Lines as an editor numbers them: a final newline does not add an empty line. */
+export function countLines(text: string): number {
+  if (text.length === 0) return 0;
+  const breaks = text.match(/\r\n|\r|\n/g)?.length ?? 0;
+  return /[\r\n]$/.test(text) ? breaks : breaks + 1;
 }
 
 export function extractFolders(files: FileInfo[]): FolderInfo[] {
@@ -87,12 +94,13 @@ function visibility(node: { hasModifier(kind: SyntaxKind): boolean }): 'public' 
   return 'public';
 }
 
-export function extractClasses(parsed: Parsed[]): ClassInfo[] {
+export function extractClasses(parsed: Parsed[], exported: Map<string, Set<string>>): ClassInfo[] {
   const classes: ClassInfo[] = [];
   for (const { sf, rel } of parsed) {
+    const names = exported.get(rel) ?? new Set<string>();
     for (const cls of sf.getClasses()) {
-      const name = cls.getName() ?? (cls.isDefaultExport() ? 'default' : undefined);
-      if (!name) continue;
+      const name = cls.getName() ?? 'default'; // only `export default class {}` has no name
+      const isExported = names.has(name);
       classes.push({
         id: `${rel}:${name}`,
         name,
@@ -100,7 +108,7 @@ export function extractClasses(parsed: Parsed[]): ClassInfo[] {
         file: rel,
         line: cls.getStartLineNumber(),
         endLine: cls.getEndLineNumber(),
-        exported: cls.isExported(),
+        exported: isExported,
         methods: cls.getMethods().map((m) => ({
           name: m.getName(),
           parameters: parameters(m.getParameters()),
@@ -125,9 +133,10 @@ export function extractClasses(parsed: Parsed[]): ClassInfo[] {
   return classes;
 }
 
-export function extractInterfaces(parsed: Parsed[]): InterfaceInfo[] {
+export function extractInterfaces(parsed: Parsed[], exported: Map<string, Set<string>>): InterfaceInfo[] {
   const interfaces: InterfaceInfo[] = [];
   for (const { sf, rel } of parsed) {
+    const names = exported.get(rel) ?? new Set<string>();
     for (const iface of sf.getInterfaces()) {
       const name = iface.getName();
       interfaces.push({
@@ -137,7 +146,7 @@ export function extractInterfaces(parsed: Parsed[]): InterfaceInfo[] {
         file: rel,
         line: iface.getStartLineNumber(),
         endLine: iface.getEndLineNumber(),
-        exported: iface.isExported(),
+        exported: names.has(name),
         properties: iface.getProperties().map((p) => ({
           name: p.getName(),
           type: annotation(p, p.getTypeNode()),
@@ -151,39 +160,84 @@ export function extractInterfaces(parsed: Parsed[]): InterfaceInfo[] {
 }
 
 /**
- * Names a file exports from its own declarations (re-exports are left out,
- * they belong to the file that declares them), plus the local names of
- * those declarations so `export default function Foo` marks Foo exported.
+ * Names a file exports from its own declarations, with the line of each
+ * declaration. Re-exports (`export ... from`) are left out: they belong to
+ * the file that declares them. Read from the syntax tree only, so no type
+ * checker (and no node_modules typings) is needed.
+ *
+ * exportedLocalNames also holds the local names behind each export, so
+ * `export default function Foo` marks Foo as exported.
  */
 export function extractExports(parsed: Parsed[]): {
   exportsByFile: Record<string, string[]>;
+  exportLines: Record<string, Record<string, number>>;
   exportedLocalNames: Map<string, Set<string>>;
 } {
   const exportsByFile: Record<string, string[]> = {};
+  const exportLines: Record<string, Record<string, number>> = {};
   const exportedLocalNames = new Map<string, Set<string>>();
-  for (const { sf, rel } of parsed) {
-    const names: string[] = [];
+
+  for (const { sf: wrapped, rel } of parsed) {
+    const sf = wrapped.compilerNode;
+    const lineOf = (n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+    const lines: Record<string, number> = {};
     const locals = new Set<string>();
-    let exported: ReadonlyMap<string, Node[]>;
-    try {
-      exported = sf.getExportedDeclarations();
-    } catch {
-      exported = new Map();
-    }
-    for (const [exportName, decls] of exported) {
-      const own = decls.filter((d) => d.getSourceFile() === sf);
-      if (own.length === 0) continue;
-      names.push(exportName);
-      locals.add(exportName);
-      for (const d of own) {
-        const local = (d as unknown as { getName?: () => string | undefined }).getName?.();
-        if (local) locals.add(local);
+    const topLevel = new Map<string, number>(); // local declaration name -> line
+
+    const bindingNames = (name: ts.BindingName): string[] => {
+      if (ts.isIdentifier(name)) return [name.text];
+      return name.elements.flatMap((el) => (ts.isOmittedExpression(el) ? [] : bindingNames(el.name)));
+    };
+    const declaredNames = (st: ts.Statement): string[] => {
+      if (ts.isVariableStatement(st)) return st.declarationList.declarations.flatMap((d) => bindingNames(d.name));
+      if (
+        (ts.isFunctionDeclaration(st) || ts.isClassDeclaration(st) || ts.isInterfaceDeclaration(st) ||
+          ts.isTypeAliasDeclaration(st) || ts.isEnumDeclaration(st) || ts.isModuleDeclaration(st)) &&
+        st.name && ts.isIdentifier(st.name)
+      ) {
+        return [st.name.text];
+      }
+      return [];
+    };
+    const mods = (st: ts.Statement) => (ts.canHaveModifiers(st) ? ts.getModifiers(st) ?? [] : []);
+
+    for (const st of sf.statements) for (const n of declaredNames(st)) if (!topLevel.has(n)) topLevel.set(n, lineOf(st));
+
+    for (const st of sf.statements) {
+      const m = mods(st);
+      const isExport = m.some((x) => x.kind === ts.SyntaxKind.ExportKeyword);
+      const isDefault = m.some((x) => x.kind === ts.SyntaxKind.DefaultKeyword);
+      if (ts.isModuleDeclaration(st) && st.flags & ts.NodeFlags.GlobalAugmentation) continue;
+
+      if (isExport) {
+        const names = declaredNames(st);
+        if (isDefault) {
+          lines['default'] = lineOf(st);
+          names.forEach((n) => locals.add(n));
+        } else {
+          for (const n of names) {
+            lines[n] = lineOf(st);
+            locals.add(n);
+          }
+        }
+      } else if (ts.isExportAssignment(st)) {
+        lines['default'] = lineOf(st);
+        if (ts.isIdentifier(st.expression)) locals.add(st.expression.text);
+      } else if (ts.isExportDeclaration(st) && !st.moduleSpecifier && st.exportClause && ts.isNamedExports(st.exportClause)) {
+        for (const el of st.exportClause.elements) {
+          const local = (el.propertyName ?? el.name).text;
+          lines[el.name.text] = topLevel.get(local) ?? lineOf(st);
+          locals.add(local);
+        }
       }
     }
-    exportsByFile[rel] = names.sort();
+
+    for (const n of Object.keys(lines)) locals.add(n);
+    exportsByFile[rel] = Object.keys(lines).sort();
+    exportLines[rel] = lines;
     exportedLocalNames.set(rel, locals);
   }
-  return { exportsByFile, exportedLocalNames };
+  return { exportsByFile, exportLines, exportedLocalNames };
 }
 
 interface RawImport {
@@ -214,11 +268,12 @@ function collectRawImports(sf: SourceFile): RawImport[] {
   for (const exp of sf.getExportDeclarations()) {
     const spec = exp.getModuleSpecifierValue();
     if (!spec) continue;
-    const named = exp.getNamedExports().map((n) => n.getName());
+    const namedNodes = exp.getNamedExports();
+    const named = namedNodes.map((n) => n.getName());
     out.push({
       specifier: spec,
       syntax: 'export',
-      typeOnly: exp.isTypeOnly(),
+      typeOnly: exp.isTypeOnly() || (namedNodes.length > 0 && namedNodes.every((n) => n.isTypeOnly())),
       names: named.length > 0 ? named : ['*'],
       line: exp.getStartLineNumber(),
     });

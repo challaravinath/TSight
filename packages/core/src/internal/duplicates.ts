@@ -19,7 +19,7 @@ export function findDuplicates(parsed: Parsed[]): DuplicateGroup[] {
 
   for (const { sf, rel } of parsed) {
     const text = sf.getFullText();
-    const tokens = tokenize(text, rel);
+    const tokens = tokenize(sf.compilerNode);
     if (tokens.length < MIN_DUPLICATE_TOKENS) continue;
     const tokenHash = sha1(tokens.join('\u0000'));
     const bytesHash = sha1(text);
@@ -41,18 +41,31 @@ export function findDuplicates(parsed: Parsed[]): DuplicateGroup[] {
   return groups.sort((a, b) => a.items[0].file.localeCompare(b.items[0].file));
 }
 
-export function tokenize(text: string, fileName: string): string[] {
-  const isJsx = /\.[jt]sx$/i.test(fileName);
-  const scanner = ts.createScanner(
-    ts.ScriptTarget.Latest,
-    /* skipTrivia */ true,
-    isJsx ? ts.LanguageVariant.JSX : ts.LanguageVariant.Standard,
-    text,
-  );
+/**
+ * The file's tokens, taken from the parse tree so template literals and
+ * JSX text are read correctly (a bare scanner mistakes `//` inside them
+ * for a comment). Comments and whitespace are not tokens; runs of
+ * whitespace inside JSX text are collapsed to one space.
+ */
+export function tokenize(sf: ts.SourceFile): string[] {
   const tokens: string[] = [];
-  for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
-    tokens.push(scanner.getTokenText());
-  }
+  const visit = (node: ts.Node): void => {
+    if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode) return; // comments
+    const children = node.getChildren(sf);
+    if (children.length === 0) {
+      if (node.kind === ts.SyntaxKind.EndOfFileToken) return;
+      const text = node.getText(sf);
+      if (node.kind === ts.SyntaxKind.JsxText) {
+        const collapsed = text.replace(/\s+/g, ' ').trim();
+        if (collapsed) tokens.push(collapsed);
+      } else {
+        tokens.push(text);
+      }
+      return;
+    }
+    for (const child of children) visit(child);
+  };
+  visit(sf);
   return tokens;
 }
 

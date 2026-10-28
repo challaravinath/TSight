@@ -49,8 +49,19 @@ export function cyclomaticComplexity(unit: ts.Node): number {
   return score;
 }
 
+const unitCache = new WeakMap<ts.Node, boolean>();
+
 /** Is this node a unit that gets its own score? */
 export function isUnit(node: ts.Node): boolean {
+  let v = unitCache.get(node);
+  if (v === undefined) {
+    v = computeIsUnit(node);
+    unitCache.set(node, v);
+  }
+  return v;
+}
+
+function computeIsUnit(node: ts.Node): boolean {
   switch (node.kind) {
     case ts.SyntaxKind.FunctionDeclaration:
     case ts.SyntaxKind.MethodDeclaration:
@@ -89,7 +100,33 @@ function unitNameForExpression(node: ts.Node): { name: string; owner?: string } 
   if (ts.isExportAssignment(parent)) {
     return { name: 'default' };
   }
+  // A function passed inline is part of the unit around it. At the top
+  // level of a file there is none (forwardRef(...), app.get('/', ...)), so
+  // it is scored on its own, named after where it ends up.
+  if (!hasEnclosingUnit(node)) return { name: topLevelName(node) };
   return null;
+}
+
+function hasEnclosingUnit(node: ts.Node): boolean {
+  for (let p = node.parent; p && !ts.isSourceFile(p); p = p.parent) {
+    if (isUnit(p)) return true;
+  }
+  return false;
+}
+
+function topLevelName(node: ts.Node): string {
+  for (let p = node.parent; p && !ts.isSourceFile(p); p = p.parent) {
+    if (ts.isVariableDeclaration(p) && ts.isIdentifier(p.name)) return p.name.text;
+    if (ts.isExportAssignment(p)) return 'default';
+    if (ts.isPropertyAssignment(p) && propertyNameText(p.name)) return propertyNameText(p.name)!;
+  }
+  if (ts.isFunctionExpression(node) && node.name) return node.name.text;
+  const call = node.parent && ts.isCallExpression(node.parent) ? node.parent : undefined;
+  if (call) {
+    const callee = call.expression.getText().replace(/\s+/g, '');
+    return `${callee.length > 40 ? callee.slice(0, 40) + '…' : callee} callback`;
+  }
+  return '(anonymous)';
 }
 
 function propertyNameText(name: ts.PropertyName): string | null {
