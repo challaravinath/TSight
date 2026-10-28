@@ -1,362 +1,165 @@
-import { SourceFile, Node, SyntaxKind } from 'ts-morph';
-import {
-  FunctionInfo,
-  StructuralSignature,
-  StructuralTwin,
-  SimilarityCriterion,
-} from '../types.js';
-import { toRelative } from './paths.js';
+import { ts } from 'ts-morph';
+import * as crypto from 'crypto';
+import type { StructuralTwin, SimilarityCriterion, StructuralTwinReport, FileRole } from '../types.js';
+import type { UnitRecord } from './complexity.js';
+
+/** Functions smaller than this many syntax nodes are skipped (one-line getters are often identical on purpose). */
+export const MIN_TWIN_NODES = 80;
+const MAX_RESULTS = 50;
+
+interface Shape {
+  unit: UnitRecord;
+  hash: string; // syntax tree with names and literal values removed
+  nodes: number;
+  statements: number;
+  names: string; // identifiers in order
+  values: string; // literal values in order
+}
 
 /**
- * Find functions that are structurally similar.
- * We compare discrete, verifiable criteria — no fuzzy scores.
+ * Structural twins: functions whose syntax trees are identical once
+ * identifier names and literal values are ignored. This is clone
+ * detection ("type 2" clones), so every reported pair can be checked by
+ * reading the two functions side by side.
+ *
+ * Each pair says whether the names and the literal values also match:
+ * both matching means the function was copied as is.
  */
 export function findStructuralTwins(
-  rootPath: string,
-  sourceFiles: SourceFile[],
-  _functions: FunctionInfo[],
-): StructuralTwin[] {
+  units: Array<UnitRecord & { sf: ts.SourceFile; role: FileRole }>,
+): StructuralTwinReport {
+  const groups = new Map<string, Shape[]>();
+  let compared = 0;
+
+  for (const u of units) {
+    if (u.role !== 'source' || !u.node.body) continue;
+    const shape = shapeOf(u, u.sf);
+    if (shape.nodes < MIN_TWIN_NODES || shape.statements < 3) continue;
+    compared++;
+    if (!groups.has(shape.hash)) groups.set(shape.hash, []);
+    groups.get(shape.hash)!.push(shape);
+  }
+
   const twins: StructuralTwin[] = [];
-
-  // Build structural signatures for all meaningful functions
-  const signatures: StructuralSignature[] = [];
-
-  for (const sf of sourceFiles) {
-    const relativePath = toRelative(rootPath, sf.getFilePath());
-
-    // Process top-level functions
-    for (const func of sf.getFunctions()) {
-      const name = func.getName();
-      if (!name) continue;
-
-      const sig = extractStructuralSignature(func, name, relativePath);
-      // Only consider functions with meaningful body (at least 3 statements)
-      if (sig && sig.statementCount >= 3) {
-        signatures.push(sig);
-      }
-    }
-
-    // Process arrow functions assigned to variables
-    for (const varDecl of sf.getVariableDeclarations()) {
-      const init = varDecl.getInitializer();
-      if (init && (Node.isArrowFunction(init) || Node.isFunctionExpression(init))) {
-        const name = varDecl.getName();
-        const sig = extractStructuralSignature(init, name, relativePath);
-        if (sig && sig.statementCount >= 3) {
-          signatures.push(sig);
-        }
-      }
-    }
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    members.sort((a, b) => a.unit.info.file.localeCompare(b.unit.info.file) || a.unit.info.line - b.unit.info.line);
+    const first = members[0];
+    for (const other of members.slice(1)) twins.push(describePair(first, other, members.length));
   }
 
-  // O(n²) but filtered to meaningful functions; cap to keep memory bounded
-  const maxSignatures = Math.min(signatures.length, 200);
+  twins.sort(
+    (x, y) =>
+      y.matchedCount - x.matchedCount ||
+      x.functionA.file.localeCompare(y.functionA.file) ||
+      x.functionA.line - y.functionA.line,
+  );
 
-  if (signatures.length < 2) {
-    return [];
-  }
-
-  const signaturesLimited = signatures.slice(0, maxSignatures);
-
-  for (let i = 0; i < signaturesLimited.length; i++) {
-    for (let j = i + 1; j < signaturesLimited.length; j++) {
-      const sigA = signaturesLimited[i];
-      const sigB = signaturesLimited[j];
-
-      // Same-file helpers are expected to be similar — skip
-      if (sigA.file === sigB.file) continue;
-
-      // Cheap pre-check before the per-criterion comparison
-      if (sigA.paramCount !== sigB.paramCount || sigA.isAsync !== sigB.isAsync) {
-        continue;
-      }
-
-      const comparison = compareSignatures(sigA, sigB);
-
-      if (comparison.matchedCount >= 6) {
-        twins.push(comparison);
-      }
-
-      if (twins.length >= 30) break;
-    }
-    if (twins.length >= 30) break;
-  }
-
-  twins.sort((a, b) => b.matchedCount - a.matchedCount);
-
-  return twins.slice(0, 20);
+  return { twins: twins.slice(0, MAX_RESULTS), functionsCompared: compared, pairsFound: twins.length };
 }
 
-/**
- * Extract a structural signature from a function's AST.
- * Everything here is factual — directly from parsing.
- */
-function extractStructuralSignature(
-  func: any,
-  name: string,
-  file: string,
-): StructuralSignature | null {
-  try {
-    const body = func.getBody?.();
-    if (!body) return null;
+function shapeOf(u: UnitRecord, sf: ts.SourceFile): Shape {
+  const kinds: number[] = [];
+  const names: string[] = [];
+  const values: string[] = [];
+  let statements = 0;
 
-    const params = func.getParameters?.() || [];
-    const paramTypes = params.map((p: any) =>
-      simplifyType(p.getType?.()?.getText?.() || 'unknown'),
-    );
-
-    const returnType = simplifyType(func.getReturnType?.()?.getText?.() || 'unknown');
-
-    let statementCount = 0;
-    let hasLoop = false;
-    let hasTryCatch = false;
-    let hasConditional = false;
-    const controlFlowParts: string[] = [];
-    const patterns: string[] = [];
-
-    body.forEachDescendant?.((node: Node) => {
-      const kind = node.getKind();
-
-      if (
-        kind === SyntaxKind.ExpressionStatement ||
-        kind === SyntaxKind.VariableStatement ||
-        kind === SyntaxKind.ReturnStatement ||
-        kind === SyntaxKind.ThrowStatement
-      ) {
-        statementCount++;
-      }
-
-      if (kind === SyntaxKind.IfStatement) {
-        hasConditional = true;
-        if (!controlFlowParts.includes('if')) controlFlowParts.push('if');
-
-        // Guard clause = if-then with early return/throw
-        const ifNode = node as any;
-        const thenBlock = ifNode.getThenStatement?.()?.getText?.() || '';
-        if (thenBlock.includes('return') || thenBlock.includes('throw')) {
-          if (!patterns.includes('guard-clause')) patterns.push('guard-clause');
-        }
-      }
-
-      if (
-        kind === SyntaxKind.ForStatement ||
-        kind === SyntaxKind.ForInStatement ||
-        kind === SyntaxKind.ForOfStatement ||
-        kind === SyntaxKind.WhileStatement
-      ) {
-        hasLoop = true;
-        if (!controlFlowParts.includes('loop')) controlFlowParts.push('loop');
-      }
-
-      if (kind === SyntaxKind.TryStatement) {
-        hasTryCatch = true;
-        if (!controlFlowParts.includes('try')) controlFlowParts.push('try');
-      }
-
-      if (kind === SyntaxKind.CatchClause) {
-        if (!controlFlowParts.includes('catch')) controlFlowParts.push('catch');
-      }
-
-      if (kind === SyntaxKind.ReturnStatement) {
-        if (!controlFlowParts.includes('return')) controlFlowParts.push('return');
-      }
-
-      if (kind === SyntaxKind.AwaitExpression) {
-        if (!patterns.includes('await-call')) patterns.push('await-call');
-      }
-
-      if (kind === SyntaxKind.CallExpression) {
-        const callText = node.getText?.() || '';
-        if (
-          callText.includes('.get(') ||
-          callText.includes('.post(') ||
-          callText.includes('.put(') ||
-          callText.includes('.delete(') ||
-          callText.includes('fetch(')
-        ) {
-          if (!patterns.includes('api-call')) patterns.push('api-call');
-        }
-        if (callText.includes('log') || callText.includes('console.')) {
-          if (!patterns.includes('logging')) patterns.push('logging');
-        }
-      }
-
-      if (kind === SyntaxKind.ThrowStatement) {
-        if (!patterns.includes('error-throw')) patterns.push('error-throw');
-      }
-    });
-
-    return {
-      file,
-      name,
-      line: func.getStartLineNumber?.() || 1,
-      paramCount: params.length,
-      paramTypes,
-      returnType,
-      isAsync: func.isAsync?.() ?? false,
-      statementCount,
-      controlFlowPattern: controlFlowParts.join('-') || 'linear',
-      hasLoop,
-      hasTryCatch,
-      hasConditional,
-      patterns,
-    };
-  } catch (e) {
-    return null;
-  }
-}
-
-/**
- * Map TypeScript types to a coarse category for comparison.
- * Exact types aren't needed — just structural categories.
- */
-function simplifyType(type: string): string {
-  const t = type.toLowerCase();
-  if (t === 'void' || t === 'undefined') return 'void';
-  if (t === 'string') return 'string';
-  if (t === 'number' || t === 'bigint') return 'number';
-  if (t === 'boolean') return 'boolean';
-  if (t.startsWith('promise')) return 'Promise';
-  if (t.includes('[]') || t.startsWith('array')) return 'array';
-  if (t === 'any' || t === 'unknown') return 'any';
-  if (t === 'null' || t === 'never') return t;
-  return 'object';
-}
-
-/**
- * Compare two structural signatures and produce criteria breakdown.
- * Every criterion is explicit and verifiable.
- */
-function compareSignatures(a: StructuralSignature, b: StructuralSignature): StructuralTwin {
-  const criteria: SimilarityCriterion[] = [];
-  let matchedCount = 0;
-
-  // 1. Parameter count
-  const paramCountMatch = a.paramCount === b.paramCount;
-  criteria.push({
-    name: 'Parameter count',
-    description: paramCountMatch
-      ? `Both take ${a.paramCount} parameter(s)`
-      : `Different parameter counts`,
-    valueA: String(a.paramCount),
-    valueB: String(b.paramCount),
-    matched: paramCountMatch,
-  });
-  if (paramCountMatch) matchedCount++;
-
-  // 2. Parameter types (simplified)
-  const paramTypesMatch =
-    a.paramTypes.length === b.paramTypes.length &&
-    a.paramTypes.every((t, i) => t === b.paramTypes[i]);
-  criteria.push({
-    name: 'Parameter types',
-    description: paramTypesMatch ? `Same parameter type pattern` : `Different parameter types`,
-    valueA: a.paramTypes.join(', ') || '(none)',
-    valueB: b.paramTypes.join(', ') || '(none)',
-    matched: paramTypesMatch,
-  });
-  if (paramTypesMatch) matchedCount++;
-
-  // 3. Return type
-  const returnMatch = a.returnType === b.returnType;
-  criteria.push({
-    name: 'Return type',
-    description: returnMatch ? `Both return ${a.returnType}` : `Different return types`,
-    valueA: a.returnType,
-    valueB: b.returnType,
-    matched: returnMatch,
-  });
-  if (returnMatch) matchedCount++;
-
-  // 4. Async/sync
-  const asyncMatch = a.isAsync === b.isAsync;
-  criteria.push({
-    name: 'Async pattern',
-    description: asyncMatch
-      ? a.isAsync
-        ? 'Both async'
-        : 'Both sync'
-      : 'Different async patterns',
-    valueA: a.isAsync ? 'async' : 'sync',
-    valueB: b.isAsync ? 'async' : 'sync',
-    matched: asyncMatch,
-  });
-  if (asyncMatch) matchedCount++;
-
-  // 5. Statement count (within ±3)
-  const stmtDiff = Math.abs(a.statementCount - b.statementCount);
-  const stmtMatch = stmtDiff <= 3;
-  criteria.push({
-    name: 'Body size',
-    description: stmtMatch
-      ? `Similar size (~${Math.round((a.statementCount + b.statementCount) / 2)} statements)`
-      : `Different sizes`,
-    valueA: `${a.statementCount} statements`,
-    valueB: `${b.statementCount} statements`,
-    matched: stmtMatch,
-  });
-  if (stmtMatch) matchedCount++;
-
-  // 6. Control flow pattern
-  const cfMatch = a.controlFlowPattern === b.controlFlowPattern;
-  criteria.push({
-    name: 'Control flow',
-    description: cfMatch ? `Same flow: ${a.controlFlowPattern}` : `Different control flow`,
-    valueA: a.controlFlowPattern,
-    valueB: b.controlFlowPattern,
-    matched: cfMatch,
-  });
-  if (cfMatch) matchedCount++;
-
-  // 7. Has try/catch
-  const tryMatch = a.hasTryCatch === b.hasTryCatch;
-  criteria.push({
-    name: 'Error handling',
-    description: tryMatch
-      ? a.hasTryCatch
-        ? 'Both have try/catch'
-        : 'Neither has try/catch'
-      : 'Different error handling',
-    valueA: a.hasTryCatch ? 'has try/catch' : 'no try/catch',
-    valueB: b.hasTryCatch ? 'has try/catch' : 'no try/catch',
-    matched: tryMatch,
-  });
-  if (tryMatch) matchedCount++;
-
-  // 8. Code patterns overlap
-  const commonPatterns = a.patterns.filter((p) => b.patterns.includes(p));
-  const patternOverlap = commonPatterns.length >= Math.min(a.patterns.length, b.patterns.length, 1);
-  criteria.push({
-    name: 'Code patterns',
-    description:
-      commonPatterns.length > 0 ? `Shared: ${commonPatterns.join(', ')}` : 'No common patterns',
-    valueA: a.patterns.join(', ') || '(none detected)',
-    valueB: b.patterns.join(', ') || '(none detected)',
-    matched: patternOverlap,
-  });
-  if (patternOverlap) matchedCount++;
-
-  let verdict: 'structural-twin' | 'similar-shape' | 'worth-reviewing';
-  let summary: string;
-
-  if (matchedCount >= 7) {
-    verdict = 'structural-twin';
-    summary = 'Nearly identical structure — strong candidate for consolidation';
-  } else if (matchedCount >= 6) {
-    verdict = 'similar-shape';
-    summary = 'Very similar structure — worth reviewing for potential reuse';
-  } else {
-    verdict = 'worth-reviewing';
-    summary = 'Some structural similarities — may benefit from shared abstraction';
-  }
+  const visit = (node: ts.Node): void => {
+    // Nested functions (a React handler, a helper) are part of the comparison.
+    kinds.push(node.kind);
+    // Facts stored on the node rather than as child nodes.
+    if (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) kinds.push(1000 + node.operator);
+    if (ts.isTypeOperatorNode(node)) kinds.push(1000 + node.operator);
+    if (ts.isVariableDeclarationList(node)) kinds.push(2000 + (node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const | ts.NodeFlags.Using | ts.NodeFlags.AwaitUsing)));
+    if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) {
+      names.push(node.text);
+    } else if (
+      ts.isStringLiteral(node) ||
+      ts.isNumericLiteral(node) ||
+      ts.isBigIntLiteral(node) ||
+      ts.isNoSubstitutionTemplateLiteral(node) ||
+      ts.isRegularExpressionLiteral(node) ||
+      node.kind === ts.SyntaxKind.TemplateHead ||
+      node.kind === ts.SyntaxKind.TemplateMiddle ||
+      node.kind === ts.SyntaxKind.TemplateTail ||
+      node.kind === ts.SyntaxKind.JsxText
+    ) {
+      values.push(node.getText(sf));
+    } else if (ts.isStatement(node) && !ts.isBlock(node)) {
+      statements++;
+    }
+    ts.forEachChild(node, visit);
+  };
+  // Parameters and body, not the function's own name.
+  u.node.parameters.forEach(visit);
+  if (u.node.type) visit(u.node.type);
+  if (u.node.body) visit(u.node.body);
 
   return {
-    functionA: { file: a.file, name: a.name, line: a.line },
-    functionB: { file: b.file, name: b.name, line: b.line },
+    unit: u,
+    hash: crypto.createHash('sha1').update(kinds.join(',')).digest('hex'),
+    nodes: kinds.length,
+    statements,
+    names: names.join('\u0000'),
+    values: values.join('\u0000'),
+  };
+}
+
+function describePair(a: Shape, b: Shape, groupSize: number): StructuralTwin {
+  const A = a.unit.info;
+  const B = b.unit.info;
+  const criteria: SimilarityCriterion[] = [
+    {
+      name: 'Syntax tree',
+      description: `Identical once names and literal values are ignored (${a.nodes} syntax nodes)`,
+      valueA: `${a.nodes} nodes`,
+      valueB: `${b.nodes} nodes`,
+      matched: true,
+    },
+    {
+      name: 'Statements',
+      description: `${a.statements} statements each`,
+      valueA: String(a.statements),
+      valueB: String(b.statements),
+      matched: a.statements === b.statements,
+    },
+    {
+      name: 'Parameters',
+      description: `${A.parameters.length} each`,
+      valueA: A.parameters.map((p) => p.name).join(', ') || '(none)',
+      valueB: B.parameters.map((p) => p.name).join(', ') || '(none)',
+      matched: A.parameters.length === B.parameters.length,
+    },
+    {
+      name: 'Literal values',
+      description: a.values === b.values ? 'Same strings and numbers' : 'Some strings or numbers differ',
+      valueA: a.values === b.values ? 'same' : 'differs',
+      valueB: a.values === b.values ? 'same' : 'differs',
+      matched: a.values === b.values,
+    },
+    {
+      name: 'Names',
+      description: a.names === b.names ? 'Same variable and function names' : 'Some names differ',
+      valueA: a.names === b.names ? 'same' : 'differs',
+      valueB: a.names === b.names ? 'same' : 'differs',
+      matched: a.names === b.names,
+    },
+  ];
+  const matchedCount = criteria.filter((c) => c.matched).length;
+  const exactCopy = a.names === b.names && a.values === b.values;
+  const others = groupSize > 2 ? ` ${groupSize} functions share this shape.` : '';
+  return {
+    functionA: { file: A.file, name: A.name, line: A.line },
+    functionB: { file: B.file, name: B.name, line: B.line },
     criteria,
     matchedCount,
     totalCount: criteria.length,
-    verdict,
-    summary,
+    verdict: exactCopy ? 'structural-twin' : a.values === b.values ? 'similar-shape' : 'worth-reviewing',
+    summary:
+      (exactCopy
+        ? 'Same code: only the function name differs.'
+        : a.values === b.values
+          ? 'Same code with different names.'
+          : 'Same structure with different names or values.') + others,
   };
 }

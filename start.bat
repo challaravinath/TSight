@@ -1,122 +1,56 @@
 @echo off
-chcp 65001 >nul 2>nul
-title TSight - TypeScript Code Analyzer
+:: Start TSight: installs what's needed, builds, and opens the browser.
+:: Usage: start.bat [folder to analyze]
+
+set "TARGET="
+if not "%~1"=="" set "TARGET=%~f1"
+
+cd /d "%~dp0"
 
 echo.
-echo  ============================================================
-echo.
-echo    TSight - TypeScript Code Analyzer
-echo.
-echo    Understand any codebase in 30 seconds.
-echo    No AI. No guessing. Just facts from your code.
-echo.
-echo  ============================================================
+echo   TSight
+echo   Understand any TypeScript codebase in 30 seconds.
+echo   No AI. No guessing. Just facts from your code.
 echo.
 
-:: Check if Node.js is installed
 where node >nul 2>nul
 if %ERRORLEVEL% NEQ 0 (
-    echo  [ERROR] Node.js is not installed!
-    echo.
-    echo  TSight requires Node.js 18 or higher.
-    echo.
-    echo  Download from: https://nodejs.org/
-    echo.
-    echo  After installing, restart this script.
-    echo.
+    echo   Node.js is not installed. TSight needs Node.js 20 or newer.
+    echo   Get it from https://nodejs.org/
     pause
     exit /b 1
 )
 
-:: Check Node version
-for /f "tokens=*" %%i in ('node -v') do set NODE_VERSION=%%i
-echo  [1/4] Node.js detected: %NODE_VERSION%
-
-:: Check if version is 18+
-for /f "tokens=1 delims=v." %%a in ('node -v') do set NODE_MAJOR=%%a
-if "%NODE_MAJOR%"=="" set NODE_MAJOR=0
-
-echo.
-
-:: Install dependencies if needed
-if not exist "node_modules" (
-    echo  [2/4] Installing dependencies... (first run, may take a minute)
-    call npm install
-    if %ERRORLEVEL% NEQ 0 (
-        echo.
-        echo  [ERROR] npm install failed. Check your internet connection.
-        pause
-        exit /b 1
-    )
-    echo        Done!
-) else (
-    echo  [2/4] Dependencies installed
-)
-echo.
-
-:: Build if needed
-if not exist "packages\core\dist" (
-    echo  [3/4] Building core...
-    call npm run build --workspace=@tsight/core
-    if %ERRORLEVEL% NEQ 0 (
-        echo  [ERROR] Build failed.
-        pause
-        exit /b 1
-    )
-    echo        Done!
-) else (
-    echo  [3/4] Core ready
+for /f "tokens=*" %%i in ('node -p "process.versions.node.split('.')[0]"') do set NODE_MAJOR=%%i
+if %NODE_MAJOR% LSS 20 (
+    echo   TSight needs Node.js 20 or newer. You have:
+    node -v
+    pause
+    exit /b 1
 )
 
-if not exist "packages\api\dist" (
-    echo        Building API...
-    call npm run build --workspace=@tsight/api
-    if %ERRORLEVEL% NEQ 0 (
-        echo  [ERROR] Build failed.
-        pause
-        exit /b 1
-    )
-    echo        Done!
-) else (
-    echo        API ready
+echo   [1/3] Installing dependencies (quick if nothing changed)...
+call npm install --no-audit --no-fund --loglevel=error
+if %ERRORLEVEL% NEQ 0 (
+    echo   npm install failed. Check your connection.
+    pause
+    exit /b 1
 )
-echo.
 
-:: Start servers
-echo  [4/4] Starting TSight...
-echo.
-echo  ------------------------------------------------------------
-echo.
-echo    API server:  http://localhost:3001
-echo    Web UI:      http://localhost:3000
-echo.
-echo    Waiting for servers to start...
-echo.
-echo  ------------------------------------------------------------
-echo.
-echo    Press Ctrl+C to stop
-echo.
+echo   [2/3] Building...
+call npm run build --silent >nul
+if %ERRORLEVEL% NEQ 0 goto buildfailed
 
-:: Start API in background
-start /B cmd /c "cd packages\api && npm start 2>nul"
-
-:: Wait for API to start
-timeout /t 3 /nobreak >nul
-
-:: Start Web UI in background
-cd packages\web
-start /B cmd /c "npm run dev 2>nul"
-
-:: Wait for Vite to be ready (it takes a few seconds)
+echo   [3/3] Starting. Close this window to stop TSight.
 echo.
-echo  Waiting for Vite dev server...
-timeout /t 5 /nobreak >nul
+if defined TARGET (
+    node packages\cli\dist\cli.js "%TARGET%"
+) else (
+    node packages\cli\dist\cli.js --pick
+)
+exit /b 0
 
-:: Now open browser
-echo  Opening browser...
-start http://localhost:3000
-
-:: Keep window open
-echo.
-echo  TSight is running. Press any key to stop...
-pause >nul
+:buildfailed
+echo   Build failed. Run npm run build to see why.
+pause
+exit /b 1

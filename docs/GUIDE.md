@@ -1,286 +1,97 @@
-# TSight User Guide
+# Using TSight
 
-**Complete guide to all TSight features and how to use them effectively.**
+This guide walks through each screen and says where its numbers come from. For the short version, see the [README](README.md).
 
----
+## The one thing to know
 
-## Table of Contents
+Any number with a dotted underline can be clicked. A panel opens on the right with the list behind it: the files, the import lines, the functions or the commits it was counted from. You can copy that list. If a number looks wrong, that list is where you find out why.
 
-1. [Overview Tab](#overview-tab)
-2. [Issues Tab](#issues-tab)
-3. [Files Tab](#files-tab)
-4. [Search Tab](#search-tab)
-5. [Git Insights Tab](#git-insights-tab)
-6. [File Detail Panel](#file-detail-panel)
+Press Esc to close the panel. Press Ctrl K (Cmd K on a Mac) anywhere to jump to a file by name.
 
----
+## The bar under the header
 
-## Overview Tab
+"Resolved 4,272 of 4,275 project imports (99.9%)" is the first thing to check. Imports TSight couldn't resolve are left out of every count below it, so dependents and reach can be a little low near them. Click the unresolved count to see each one with its file and line. The usual causes are a path alias that only a bundler knows about, or a file that is generated during the build.
 
-The Overview tab gives you a high-level snapshot of your codebase health.
+The same bar says how many entry points were found, and how much git history was read. A shallow clone is called out there, because people and co-change numbers only cover the commits that are present.
 
-### Key Metrics
+## Overview
 
-| Metric | What it means |
-|--------|---------------|
-| **Files** | Total TypeScript/JavaScript files analyzed |
-| **Functions** | Total functions and methods found |
-| **Classes** | Total class definitions |
-| **Avg Complexity** | Average cyclomatic complexity score |
+**Riskiest file to change.** The file with the highest change hotspot score: commits in the last 90 days times the highest function complexity in the file. Under it you see how many files import it directly and how many it can reach through imports. Without git history this becomes the file with the most complex function.
 
-### Health Score
+**Knowledge held by one person.** Files with history where every commit came from the same person, and how many of those belong to someone with no commits in the last 6 months. This is the code that would be hardest to pick up if that person moved on.
 
-The Health Score (0-100) is calculated from:
-- Code complexity
-- Dependency depth
-- Issue count
-- Duplication rate
+**Files nothing imports.** Source files with no importers that no entry-point rule covers, and separately those that only tests import. Before you delete one, check whether something loads it by a path TSight can't see, such as a plugin folder, a script outside the project, or `import()` with a variable.
 
-**Score Ranges:**
-- 🟢 80-100: Excellent
-- 🟡 60-79: Good
-- 🟠 40-59: Needs attention
-- 🔴 0-39: Critical
+**Codebase map.** Every source file as a rectangle, sized by lines. Pick what the color shows:
 
-### Core Files
+- Change hotspot: under 80, 80 to 199, 200 to 499, 500 to 999, 1,000 and up.
+- Dependents: under 4, 4 to 9, 10 to 24, 25 to 49, 50 and up.
+- Single author: several authors, one active author, one author with no commits in 6 months.
+- Complexity of the most complex function: under 8, 8 to 11, 12 to 19, 20 to 29, 30 and up.
 
-Files imported by 5+ other files. These are your **foundation** — changes here have wide impact.
+A folder that is too small to show its files takes the color of the highest file inside it. Click a folder to zoom in and use the path above the map to go back out. The list next to the map ranks the files by the same measure.
 
-### Hotspots
+**Dependency cycles, copied code, hidden coupling.** Counts with their lists. Hidden coupling is pairs of files that keep changing in the same commits but don't import each other. That usually means they share a format, a protocol or a convention that nothing in the code enforces.
 
-Files with high complexity AND high number of dependents:
-```
-Risk Score = Complexity × Dependents
-```
-Higher score = riskier to change without careful testing.
+## Files
 
----
+A table of every source file. Turn on "Include test files" to see tests too. Click a column header to sort. Files marked "entry point" are started by something other than an import; hover the label to see which rule matched.
 
-## Issues Tab
+## File page
 
-The Issues tab uses an **accordion layout** with confidence levels to help you prioritize.
+- The header says if the file is an entry point, part of an import loop, only used by tests, or only ever changed by one person.
+- Lines, dependents, reach, highest complexity, commits in the last 90 days and the hotspot score. Dependents, reach, complexity and a hotspot score above zero open their lists.
+- Functions, most complex first. Callbacks written inline count toward the function they sit in. A callback at the top level of the file is listed as, for example, "app.get callback".
+- History: everyone who changed the file and how many commits each made. People with no commits in the 6 months before the analysis are marked.
+- Imported by, imports, and files that usually change together with this one.
+- Packages it uses, the names it exports, and code it shares with other files.
 
-### Confidence Levels
+## Dependencies
 
-| Badge | Color | Meaning |
-|-------|-------|---------|
-| **Certain** | 🟢 Green | Verified facts — safe to act on |
-| **Maybe** | 🟡 Yellow | Possible issues — use judgment |
+- Import loops, largest first, each with one shortest path around the loop. Click the file count for every file in the group.
+- The most imported files. A change to one of these reaches the most code directly.
+- Packages by the number of files that import them.
+- Entry points grouped by the rule that found them. Add your own in `tsight.config.json`:
 
-### Sections
-
-#### 📋 Exact Duplicates [Certain]
-Files with 100% identical content (byte-for-byte match). These should definitely be consolidated.
-
-#### ⚠️ Code Issues [Certain]
-- **Circular Dependencies**: A imports B imports A (causes bundling issues)
-- **High Complexity**: Functions with cyclomatic complexity > 20
-
-#### 🔍 Structural Twins [Maybe]
-Functions with similar structure (same parameters, return type, control flow). May or may not be actual duplicates — **review before refactoring**.
-
-Displayed as a folder tree:
-```
-📁 src/api/
-   ├── fetchUserData() ↔ loadAccountInfo()  [7/8]
-   └── validateInput() ↔ checkParams()      [6/8]
+```json
+{
+  "entryPoints": ["src/plugins/*.ts", "scripts/**"]
+}
 ```
 
-The `[7/8]` indicates how many of 8 structural criteria matched.
+The patterns work like `.gitignore` patterns, relative to the analyzed folder.
 
-#### ❓ Potentially Unused [Maybe]
-Files with no imports found. Could be:
-- Entry points (index.ts)
-- Test files
-- Dynamically loaded modules
-- Actually unused
+## People
 
----
+Pick all time, the last 6 months or the last 3 months.
 
-## Files Tab
+- Files changed in the period, and how many of those had one author only.
+- With 6 or 3 months picked, the files nobody changed at all in that time.
+- Each author with the files only they changed in the period, the source files they ever touched, and the date of their last commit.
 
-Browse your entire codebase as a folder tree.
+Commits from authors whose name ends in `[bot]` are left out everywhere on this page, as are merge commits. Names are merged through `.mailmap` if the repository has one.
 
-### Features
-- Click any file to open the **File Detail Panel**
-- See file sizes and line counts
-- Visual hierarchy matches your project structure
+## Changes
 
----
+Type a branch, tag or commit and press Compare. TSight finds where your work split off from it (the merge base), analyzes the code as it was there, analyzes your working copy, and compares the two.
 
-## Search Tab
+- Reach: how many other files import the changed files, directly or through other files, and how many entry points are among them. Click either number for the files.
+- Who knows this code: from `git blame` at the merge base, the people who wrote the lines your change touches. In a shallow clone, lines from the oldest commit present are left out, because that commit is not who really wrote them.
+- Complexity: the net change in function complexity across the changed files.
+- New or larger dependency cycles: loops that exist after the change but not before, or got bigger.
+- Changed files with their line counts, complexity before and after, and who wrote most of them.
+- Usually changed with these: files that changed together with one of yours in past commits, but are not part of this change. Worth a look before you merge.
 
-Find any class, function, or file instantly.
+From the command line, `tsight diff main` prints the same thing as Markdown. With `--fail-on new-cycle` it exits with code 1 when the change adds a loop, which is what the GitHub Action uses.
 
-### How to Use
-1. Type at least 2 characters
-2. Results grouped by type (Class, Function, File)
-3. Click any result to open File Detail
+## Reports
 
-### Search Tips
-- Search by filename: `UserService`
-- Search by function name: `handleSubmit`
-- Search partial matches: `fetch` finds `fetchUser`, `fetchData`, etc.
+`tsight report` writes one HTML file with the whole UI and the analysis inside it. Add `--base main` to include the Changes page. The file loads nothing from the network, so it works from email, a shared drive or an air-gapped machine. It contains file paths, function names and author names from the project, so share it like you would share the code.
 
----
+## Analyzing a repository from GitHub
 
-## Git Insights Tab
+On the open screen you can paste a public `https://github.com/owner/repo` URL. TSight clones it into a temporary folder with the full commit history but without old file contents, and removes it when you open something else. Renames aren't followed for these clones, because detecting them would mean downloading every old version of every file.
 
-**Requires**: Project must be a git repository with history.
+## The snapshot format
 
-### File Churn
-
-Files changed most frequently in the last 90 days.
-
-**Why it matters**: High churn + high complexity = 🔥 risk
-
-| Column | Meaning |
-|--------|---------|
-| Changes | Number of commits touching this file |
-| Authors | Number of different contributors |
-| Last Changed | Most recent commit date |
-
-**Badge**: Shows count of "hot" files (5+ changes)
-
----
-
-### Ownership
-
-Who knows each file best, based on commit history.
-
-#### Time Filter
-
-| Filter | Shows |
-|--------|-------|
-| **All Time** | Historical owners (entire git history) |
-| **Last 6 months** | Only commits from last 6 months |
-| **Last 3 months** | Only commits from last 3 months |
-
-**Important**: When you filter by time, the Primary Owner is recalculated based **only on commits in that period**.
-
-#### Knowledge Gaps 🚨
-
-When using time filters, TSight shows files with **zero commits** in the selected period.
-
-```
-🚨 Knowledge Gaps                                    [23]
-   These files have zero commits in the selected time period.
-   No one on the team has touched this code recently.
-   
-   [OldPayment.ts] [legacy.ts] [deprecated.ts] +20 more
-```
-
-**This is critical for teams who recently took over a codebase** — it shows which files have no recent team knowledge.
-
-#### Ownership Stats
-
-| Stat | Meaning |
-|------|---------|
-| Primary Owner | Person with most commits (in selected time period) |
-| Ownership % | What % of commits are by the primary owner |
-| Commits | Total commits to this file (in period) |
-| Contributors | List of people who touched this file |
-
----
-
-### Bus Factor
-
-Files where only **one person** has ever committed. If that person leaves, no one knows the code.
-
-| Metric | Meaning |
-|--------|---------|
-| **X% risk** | Percentage of files with single author |
-| **Solo Files** | Count per author |
-
-#### Expandable Author View
-
-Click any author to see all their solo files, grouped by folder:
-
-```
-▼ 👤 Developer A                              [149 solo files]
-  
-  📁 src/components/                         (45)
-     ├── ComponentOne.tsx                         →
-     ├── ComponentTwo.tsx                         →
-     └── ComponentThree.styles.ts                 →
-  
-  📁 src/types/                              (23)
-     ├── DataTypes.ts                             →
-     └── PickerTypes.tsx                          →
-```
-
-Click any file to open its detail panel.
-
----
-
-## File Detail Panel
-
-Click any file anywhere in TSight to open the detail panel.
-
-### Sections
-
-#### Summary
-- File path and name
-- Lines of code
-- Complexity score
-- Language
-
-#### Dependencies
-- **Imports**: What this file imports
-- **Imported By**: What files import this one (your dependents)
-
-#### Contents
-- Classes defined in this file
-- Functions defined in this file
-- Interfaces and types
-
-#### Blast Radius 💥
-Click "Show Blast Radius" to see:
-- Direct dependents (1 hop)
-- Indirect dependents (2+ hops)
-- Total files affected if you change this file
-
----
-
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Esc` | Close any open panel/modal |
-| `/` | Focus search (when available) |
-
----
-
-## Tips for Teams
-
-### For New Team Members
-1. Start with **Overview** to understand codebase size
-2. Check **Core Files** to find the foundation
-3. Use **Search** to find specific components
-
-### For Tech Leads
-1. Check **Hotspots** before sprint planning
-2. Review **Bus Factor** for knowledge risks
-3. Use **Blast Radius** before major refactors
-
-### For Teams Taking Over a Codebase
-1. Go to **Git Insights → Ownership**
-2. Set time filter to **Last 6 months** (or when your team started)
-3. Review **Knowledge Gaps** — these files need documentation or pairing
-
----
-
-## The TSight Philosophy
-
-**Every number is real.**
-
-- "47 files depend on this" → Exactly 47 files
-- "Risk Score 612" → Complexity (18) × Dependents (34)
-- "100% duplicate" → Byte-for-byte identical
-- "Knowledge Gap" → Zero commits in time period
-
-No AI guessing. No estimates. Just facts from your actual code and git history.
-
----
-
-**TSight: See your code. For real.**
+`tsight analyze` prints one JSON object, the same one the UI and reports read. Files are listed once and everything else refers to them by their position in that list, which keeps the output small. The `schema` field is 1 and will go up if the format changes in a way that breaks readers.

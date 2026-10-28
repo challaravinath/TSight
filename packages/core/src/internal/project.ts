@@ -1,76 +1,32 @@
-import { Project, SourceFile, ScriptTarget, ModuleKind } from 'ts-morph';
-import * as fs from 'fs';
-import * as path from 'path';
+import { Project, SourceFile, ts } from 'ts-morph';
+import type { DiscoveredFile } from './discovery.js';
 
-const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx'];
-
-const EXCLUDE_PATTERNS = [
-  'node_modules',
-  'dist',
-  'build',
-  '.git',
-  'coverage',
-  '__tests__',
-  '__mocks__',
-  '*.test.',
-  '*.spec.',
-  '.d.ts',
-  'integration-tests',
-  'e2e',
-];
-
-export function createProject(): Project {
-  return new Project({
+/**
+ * A fresh ts-morph Project for one analysis run. Only parsing is used here
+ * (no type checking), so it stays fast and never pulls in node_modules.
+ */
+export function parseFiles(files: DiscoveredFile[]): Array<{ sf: SourceFile; file: DiscoveredFile }> {
+  const project = new Project({
     compilerOptions: {
-      target: ScriptTarget.ESNext,
-      module: ModuleKind.ESNext,
-      jsx: 2, // React
+      target: ts.ScriptTarget.ESNext,
+      module: ts.ModuleKind.ESNext,
+      jsx: ts.JsxEmit.Preserve,
       allowJs: true,
-      skipLibCheck: true,
       noEmit: true,
+      noResolve: true,
     },
     skipAddingFilesFromTsConfig: true,
+    skipFileDependencyResolution: true,
+    skipLoadingLibFiles: true,
   });
-}
 
-export function addSourceFiles(project: Project, projectPath: string): SourceFile[] {
-  const files: string[] = [];
-  walkDir(projectPath, files, SOURCE_EXTENSIONS, EXCLUDE_PATTERNS);
-
+  const out: Array<{ sf: SourceFile; file: DiscoveredFile }> = [];
   for (const file of files) {
     try {
-      project.addSourceFileAtPath(file);
-    } catch (e) {
-      // Skip files that can't be parsed
+      out.push({ sf: project.addSourceFileAtPath(file.abs), file });
+    } catch {
+      // Unreadable file: skipped and counted by the caller.
     }
   }
-
-  return project.getSourceFiles();
-}
-
-function walkDir(
-  dir: string,
-  files: string[],
-  extensions: string[],
-  exclude: string[],
-): void {
-  try {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-
-      if (exclude.some((ex) => entry.name.includes(ex) || fullPath.includes(ex))) {
-        continue;
-      }
-
-      if (entry.isDirectory()) {
-        walkDir(fullPath, files, extensions, exclude);
-      } else if (entry.isFile() && extensions.some((ext) => entry.name.endsWith(ext))) {
-        files.push(fullPath);
-      }
-    }
-  } catch (e) {
-    // Skip inaccessible directories
-  }
+  return out;
 }

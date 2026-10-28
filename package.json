@@ -1,15 +1,24 @@
 {
-  "name": "tsight",
-  "version": "1.0.0",
-  "description": "TSight - TypeScript Code Analyzer with Mental Model Visualization",
+  "name": "tsight-monorepo",
+  "version": "3.0.0",
+  "description": "See how a TypeScript codebase fits together, using only facts from the code and its git history",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "workspaces": [
-    "packages/*"
+    "packages/core",
+    "packages/api",
+    "packages/web",
+    "packages/cli"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
-    "dev": "concurrently \"npm run dev --workspace=@tsight/api\" \"npm run dev --workspace=@tsight/web\"",
-    "start": "npm run start --workspace=@tsight/api"
+    "build": "npm run build -w @tsight/core && npm run build -w @tsight/api && npm run build -w @tsight/web && npm run build -w tsight",
+    "test": "npm run test -w @tsight/core && npm run test -w @tsight/web && npm run test -w tsight",
+    "typecheck": "npm run typecheck -w @tsight/core && npm run typecheck -w @tsight/api && npm run typecheck -w @tsight/web && npm run typecheck -w tsight",
+    "dev": "npm run build -w @tsight/core && concurrently -k -n api,web \"npm run dev -w @tsight/api\" \"npm run dev -w @tsight/web\"",
+    "start": "npm run start --workspace=@tsight/api",
+    "tsight": "node packages/cli/dist/cli.js"
   },
   "devDependencies": {
     "concurrently": "^8.2.0",

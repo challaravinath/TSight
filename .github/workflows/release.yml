@@ -1,0 +1,55 @@
+# Push a tag like v3.0.0 to publish a GitHub release. The notes come from that
+# version's section in CHANGELOG.md, and a sample report is attached.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+      - name: Check the tag matches the version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          actual=$(node -p "require('./packages/cli/package.json').version")
+          if [ "$version" != "$actual" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $actual in packages/cli/package.json"
+            exit 1
+          fi
+
+      - name: Release notes from the changelog
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            $0 ~ "^## " v "( |$)" { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::CHANGELOG.md has no section for $version"
+            exit 1
+          fi
+
+      - name: Sample report of TSight itself
+        run: node packages/cli/dist/cli.js report . --out "tsight-report-${GITHUB_REF_NAME}.html"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "TSight ${GITHUB_REF_NAME#v}" --notes-file notes.md "tsight-report-${GITHUB_REF_NAME}.html"

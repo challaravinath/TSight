@@ -1,147 +1,135 @@
 /**
- * TSight Analyzer - orchestrator.
+ * TSight analyzer: runs the pipeline for one folder and returns a snapshot.
  *
- * Owns the ts-morph Project lifecycle and the analysis pipeline. Each stage
- * (discovery, extraction, graph, metrics, etc.) lives in `./internal/*` so
- * this file stays a high-level read of what an analysis run actually does.
+ * Each run gets its own parser and resolver, so analyzing a second project
+ * never carries files over from the first.
  */
-
-import { Project } from 'ts-morph';
-import {
-  AnalysisResult,
-  CodeIssue,
-  StructuralTwin,
-  FileInfo,
-  ClassInfo,
-  FunctionInfo,
-  InterfaceInfo,
-  ImportInfo,
-} from './types.js';
-import { createProject, addSourceFiles } from './internal/project.js';
+import * as path from 'path';
+import * as fs from 'fs';
+import type { AnalysisResult, CodeIssue } from './types.js';
+import { discoverFiles, toPosix } from './internal/discovery.js';
+import { parseFiles } from './internal/project.js';
+import { ModuleResolver, realPath } from './internal/resolve.js';
 import {
   extractFiles,
   extractFolders,
   extractClasses,
-  extractFunctions,
   extractInterfaces,
   extractImports,
+  extractExports,
+  type Parsed,
 } from './internal/extract.js';
-import { buildDependencyGraph, extractExternalPackages } from './internal/graph.js';
+import { collectUnits, calculateComplexity } from './internal/complexity.js';
+import { buildDependencyGraph, extractExternalPackages, resolutionStats } from './internal/graph.js';
+import { findEntryPoints } from './internal/entry-points.js';
 import { buildMentalModel } from './internal/mental-model.js';
-import {
-  findDeadCode,
-  findCircularDependencies,
-  findComplexFunctions,
-} from './internal/issues.js';
+import { findFilesWithoutImporters, findCircularDependencies, findComplexFunctions } from './internal/issues.js';
 import { findDuplicates } from './internal/duplicates.js';
 import { findStructuralTwins } from './internal/structural-twins.js';
-import { calculateComplexity } from './internal/complexity.js';
 import { calculateLanguages } from './internal/languages.js';
 import { calculateStats } from './internal/stats.js';
-import { generateFileCrux } from './internal/file-crux.js';
 
+export interface AnalyzeOptions {
+  /** Called with short progress messages. Defaults to no output. */
+  log?: (message: string) => void;
+}
+
+export async function analyzeProject(projectPath: string, options: AnalyzeOptions = {}): Promise<AnalysisResult> {
+  const log = options.log ?? (() => {});
+  const startTime = Date.now();
+  const given = path.resolve(projectPath);
+  if (!fs.existsSync(given) || !fs.statSync(given).isDirectory()) {
+    throw new Error(`Not a directory: ${projectPath}`);
+  }
+  // Work on the real path so symlinked folders (macOS /tmp, a linked checkout) compare equal.
+  const root = realPath(given);
+
+  const discovery = discoverFiles(root);
+  log(`Found ${discovery.files.length} code files`);
+
+  const parsedRaw = parseFiles(discovery.files);
+  const parsed: Parsed[] = parsedRaw.map(({ sf, file }) => ({ sf, rel: file.rel, role: file.role }));
+
+  const files = extractFiles(parsed);
+  const folders = extractFolders(files);
+  const languages = calculateLanguages(files);
+  const { exportsByFile, exportLines, exportedLocalNames } = extractExports(parsed);
+  const classes = extractClasses(parsed, exportedLocalNames);
+  const interfaces = extractInterfaces(parsed, exportedLocalNames);
+
+  const units = parsed.flatMap(({ sf, rel, role }) =>
+    collectUnits(sf.compilerNode, rel, exportedLocalNames.get(rel) ?? new Set()).map((u) => ({ ...u, sf: sf.compilerNode, role })),
+  );
+  const functions = units.map((u) => u.info);
+
+  const resolver = new ModuleResolver(root, parsed.map((p) => p.sf.getFilePath()));
+  const imports = extractImports(root, parsed, resolver);
+  const resolution = resolutionStats(imports, resolver.usedConfigs());
+  log(`Resolved ${resolution.internal} of ${resolution.projectImports} project imports`);
+
+  const dependencyGraph = buildDependencyGraph(files.map((f) => f.path), imports);
+  const externalPackages = extractExternalPackages(imports);
+
+  const packageJsons = [...discovery.packageJsons, ...packageJsonsAbove(root)];
+  const entryPoints = findEntryPoints(root, files, packageJsons, discovery.htmlFiles, discovery.configFiles);
+
+  const issues: CodeIssue[] = [
+    ...findCircularDependencies(dependencyGraph),
+    ...findComplexFunctions(functions, files),
+    ...findFilesWithoutImporters(files, dependencyGraph, entryPoints, resolution),
+  ];
+  const duplicates = findDuplicates(parsed);
+  const twinReport = findStructuralTwins(units);
+  const sourceFiles = new Set(files.filter((f) => f.role === 'source').map((f) => f.path));
+  const complexity = calculateComplexity(functions.filter((f) => sourceFiles.has(f.file)));
+  const mentalModel = buildMentalModel(files, dependencyGraph, entryPoints);
+  const stats = calculateStats(files, classes, functions, interfaces, issues, duplicates);
+
+  const duration = Date.now() - startTime;
+  log(`Analysis complete in ${duration} ms`);
+
+  return {
+    root,
+    analyzedAt: new Date(),
+    duration,
+    files,
+    folders,
+    languages,
+    classes,
+    functions,
+    interfaces,
+    imports,
+    resolution,
+    dependencyGraph,
+    externalPackages,
+    entryPoints,
+    exportsByFile,
+    exportLines,
+    mentalModel,
+    issues,
+    duplicates,
+    complexity,
+    structuralTwins: twinReport.twins,
+    structuralTwinStats: { functionsCompared: twinReport.functionsCompared, pairsFound: twinReport.pairsFound },
+    stats,
+  };
+}
+
+/** The nearest package.json above the root, as a path relative to the root (e.g. ../package.json). */
+function packageJsonsAbove(root: string): string[] {
+  let dir = path.dirname(root);
+  for (;;) {
+    const candidate = path.join(dir, 'package.json');
+    if (fs.existsSync(candidate)) return [toPosix(path.relative(root, candidate))];
+    const parent = path.dirname(dir);
+    if (parent === dir) return [];
+    dir = parent;
+  }
+}
+
+/** Kept for existing callers: `new Analyzer().analyze(path)`. Each call is independent. */
 export class Analyzer {
-  private project: Project;
-  private rootPath: string = '';
-
-  constructor() {
-    this.project = createProject();
-  }
-
-  /**
-   * Main entry point - analyze a project
-   */
-  async analyze(projectPath: string): Promise<AnalysisResult> {
-    const startTime = Date.now();
-    this.rootPath = projectPath;
-
-    console.log(`🔍 TSight analyzing: ${projectPath}`);
-
-    // Discovery
-    const sourceFiles = addSourceFiles(this.project, projectPath);
-    console.log(`   Found ${sourceFiles.length} source files`);
-
-    // Extraction
-    const files = extractFiles(this.rootPath, sourceFiles);
-    const folders = extractFolders(files);
-    const languages = calculateLanguages(files);
-    const classes = extractClasses(this.rootPath, sourceFiles);
-    const functions = extractFunctions(this.rootPath, sourceFiles);
-    const interfaces = extractInterfaces(this.rootPath, sourceFiles);
-    const imports = extractImports(this.rootPath, sourceFiles);
-
-    // Graph
-    const dependencyGraph = buildDependencyGraph(imports);
-    const externalPackages = extractExternalPackages(imports);
-
-    // Issues
-    const issues: CodeIssue[] = [
-      ...findDeadCode(this.rootPath, sourceFiles),
-      ...findCircularDependencies(dependencyGraph),
-      ...findComplexFunctions(functions),
-    ];
-
-    // Duplicates
-    const duplicates = findDuplicates(this.rootPath, sourceFiles);
-
-    // Structural twins (best-effort: can fail on unusual inputs)
-    let structuralTwins: StructuralTwin[] = [];
-    try {
-      structuralTwins = findStructuralTwins(this.rootPath, sourceFiles, functions);
-    } catch (e) {
-      console.error('   ⚠ Structural twins detection failed:', e);
-    }
-
-    // Metrics + model
-    const complexity = calculateComplexity(functions);
-    const mentalModel = buildMentalModel(folders, imports, classes, functions);
-    const stats = calculateStats(
-      files,
-      classes,
-      functions,
-      interfaces,
-      issues,
-      duplicates,
-      complexity,
-    );
-
-    const duration = Date.now() - startTime;
-    console.log(`   ✓ Analysis complete in ${duration}ms`);
-
-    return {
-      analyzedAt: new Date(),
-      duration,
-      files,
-      folders,
-      languages,
-      classes,
-      functions,
-      interfaces,
-      imports,
-      dependencyGraph,
-      externalPackages,
-      mentalModel,
-      issues,
-      duplicates,
-      complexity,
-      structuralTwins,
-      stats,
-    };
-  }
-
-  /**
-   * Generate a brief description for a single file.
-   * Kept on the class for backward compatibility with consumers that
-   * called `analyzer.generateFileCrux(...)`.
-   */
-  public generateFileCrux(
-    file: FileInfo,
-    classes: ClassInfo[],
-    functions: FunctionInfo[],
-    interfaces: InterfaceInfo[],
-    imports: ImportInfo[],
-    importedBy: ImportInfo[],
-  ): string {
-    return generateFileCrux(file, classes, functions, interfaces, imports, importedBy);
+  async analyze(projectPath: string, options?: AnalyzeOptions): Promise<AnalysisResult> {
+    return analyzeProject(projectPath, options);
   }
 }

@@ -1,13 +1,14 @@
 {
   "name": "@tsight/api",
-  "version": "1.0.0",
-  "description": "TSight API Server",
+  "version": "3.0.0",
+  "description": "TSight server: the web UI and a small API over @tsight/core",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc --watch"
+    "dev": "tsc && concurrently -k \"tsc --watch --preserveWatchOutput\" \"node --watch dist/index.js\"",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tsight/core": "*",
@@ -21,5 +22,6 @@
     "@types/express": "^4.17.21",
     "@types/cors": "^2.8.15",
     "typescript": "^5.3.0"
-  }
+  },
+  "types": "dist/index.d.ts"
 }

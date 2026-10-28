@@ -1,57 +1,74 @@
-import { SourceFile } from 'ts-morph';
-import * as path from 'path';
+import { ts } from 'ts-morph';
 import * as crypto from 'crypto';
-import { DuplicateGroup } from '../types.js';
-import { toRelative } from './paths.js';
+import * as path from 'path';
+import type { DuplicateGroup } from '../types.js';
+import type { Parsed } from './extract.js';
+
+/** Files shorter than this many tokens are ignored (tiny barrels and stubs are often identical on purpose). */
+export const MIN_DUPLICATE_TOKENS = 40;
 
 /**
- * Find exact-file duplicates by hashing whitespace/comment-stripped content.
- * Earlier signature accepted classes/functions/interfaces from a richer
- * similarity-detection pass, but those produced false positives and were
- * removed. The orchestrator now only passes what we actually use.
+ * Whole-file duplicates.
+ *
+ * Two files are grouped when their token streams are identical, i.e. they
+ * are the same code once whitespace and comments are ignored. Each group
+ * says whether the files are also byte-for-byte identical.
  */
-export function findDuplicates(
-  rootPath: string,
-  sourceFiles: SourceFile[],
-): DuplicateGroup[] {
-  const duplicates: DuplicateGroup[] = [];
-  const fileHashes = new Map<string, Array<{ path: string; name: string }>>();
+export function findDuplicates(parsed: Parsed[]): DuplicateGroup[] {
+  const byTokens = new Map<string, Array<{ rel: string; bytes: string }>>();
 
-  for (const sf of sourceFiles) {
-    const content = sf.getFullText();
-    const normalized = normalizeCode(content);
+  for (const { sf, rel } of parsed) {
+    const text = sf.getFullText();
+    const tokens = tokenize(sf.compilerNode);
+    if (tokens.length < MIN_DUPLICATE_TOKENS) continue;
+    const tokenHash = sha1(tokens.join('\u0000'));
+    const bytesHash = sha1(text);
+    if (!byTokens.has(tokenHash)) byTokens.set(tokenHash, []);
+    byTokens.get(tokenHash)!.push({ rel, bytes: bytesHash });
+  }
 
-    if (normalized.length < 50) continue;
-
-    const hash = crypto.createHash('md5').update(normalized).digest('hex');
-    const relativePath = toRelative(rootPath, sf.getFilePath());
-
-    if (!fileHashes.has(hash)) {
-      fileHashes.set(hash, []);
-    }
-    fileHashes.get(hash)!.push({
-      path: relativePath,
-      name: path.basename(relativePath),
+  const groups: DuplicateGroup[] = [];
+  for (const members of byTokens.values()) {
+    if (members.length < 2) continue;
+    const sameBytes = members.every((m) => m.bytes === members[0].bytes);
+    groups.push({
+      type: 'exact-file',
+      match: sameBytes ? 'bytes' : 'tokens',
+      items: members.map((m) => ({ file: m.rel, name: path.posix.basename(m.rel), line: 1 })),
+      similarity: 100,
     });
   }
-
-  for (const [, files] of fileHashes) {
-    if (files.length > 1) {
-      duplicates.push({
-        type: 'exact-file',
-        items: files.map((f) => ({ file: f.path, name: f.name, line: 1 })),
-        similarity: 100,
-      });
-    }
-  }
-
-  return duplicates;
+  return groups.sort((a, b) => a.items[0].file.localeCompare(b.items[0].file));
 }
 
-function normalizeCode(code: string): string {
-  return code
-    .replace(/\/\/.*$/gm, '')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\s+/g, '')
-    .toLowerCase();
+/**
+ * The file's tokens, taken from the parse tree so template literals and
+ * JSX text are read correctly (a bare scanner mistakes `//` inside them
+ * for a comment). Comments and whitespace are not tokens; runs of
+ * whitespace inside JSX text are collapsed to one space.
+ */
+export function tokenize(sf: ts.SourceFile): string[] {
+  const tokens: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode) return; // comments
+    const children = node.getChildren(sf);
+    if (children.length === 0) {
+      if (node.kind === ts.SyntaxKind.EndOfFileToken) return;
+      const text = node.getText(sf);
+      if (node.kind === ts.SyntaxKind.JsxText) {
+        const collapsed = text.replace(/\s+/g, ' ').trim();
+        if (collapsed) tokens.push(collapsed);
+      } else {
+        tokens.push(text);
+      }
+      return;
+    }
+    for (const child of children) visit(child);
+  };
+  visit(sf);
+  return tokens;
+}
+
+function sha1(s: string): string {
+  return crypto.createHash('sha1').update(s).digest('hex');
 }
