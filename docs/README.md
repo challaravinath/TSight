@@ -1,163 +1,84 @@
-# 🔍 TSight
+# TSight
 
-**Understand any TypeScript codebase in 30 seconds.**
+Understand any TypeScript codebase in 30 seconds.
+No AI. No guessing. Just facts from your code.
 
-> No AI. No guessing. Just facts from your code.
+TSight reads a TypeScript or JavaScript project and its git history and shows you how it fits together: which files everything depends on, what breaks if you change something, who has worked on what, and where the tangled parts are. It runs on your machine and your code stays there.
 
----
+![TSight overview of the excalidraw repository](images/overview.png)
 
-## ✨ What You Get
+## Quick start
 
-| Feature | What It Shows |
-|---------|---------------|
-| 🧠 **Mental Model** | Architecture layers at a glance |
-| 🔥 **Hotspots** | Complex + heavily used = risky to change |
-| 💥 **Blast Radius** | "If I change this, what breaks?" |
-| 🚌 **Bus Factor** | Who knows what? Knowledge risk |
-| 📋 **Issues** | Duplicates, circular deps, unused files |
-| 🗺️ **Codebase Map** | Export docs for new team members |
+You need Node.js 20 or newer.
 
----
-
-## 🚀 Quick Start
-
-### Windows
-```
-Double-click start.bat
-```
-
-### Mac / Linux
-```bash
-chmod +x start.sh && ./start.sh
-```
-
-Opens automatically at **http://localhost:3000**
-
----
-
-## 📸 Screenshots
-
-<details>
-<summary>Click to see screenshots</summary>
-
-### Dashboard
-*Overview of your codebase health*
-
-### Hotspots
-*Files that are complex AND heavily used*
-
-### Git Insights
-*Who knows what? Bus factor analysis*
-
-### Blast Radius
-*See impact before you refactor*
-
-</details>
-
----
-
-## 💡 The Principle
-
-**Every number is real.**
-
-- We say "47 files depend on this" → That's exactly 47 files
-- We say "Risk Score 612" → That's `Complexity (18) × Dependents (34)`
-- We say "100% duplicate" → Byte-for-byte identical
-- We say "Bus Factor 50%" → 50% of files have only one author
-
-**No AI hallucinations. No fuzzy estimates. Just facts you can verify.**
-
----
-
-## 🎯 Who Is This For?
-
-- **New to a codebase?** Get oriented in minutes, not days
-- **Tech lead?** Find where knowledge is concentrated
-- **Refactoring?** Know the blast radius before you start
-- **Onboarding someone?** Export a codebase map for them
-
----
-
-## 🛠️ How It Works
-
-TSight runs **100% locally**:
-1. Parses your TypeScript/React files with [ts-morph](https://ts-morph.com/)
-2. Builds a dependency graph
-3. Reads your `.git` folder for team insights (no API token needed)
-4. Shows you the results in a clean UI
-
-**Your code never leaves your machine.**
-
----
-
-## 📁 Project Structure
-
-```
-tsight/
-├── packages/
-│   ├── core/       # Analysis engine (ts-morph)
-│   ├── api/        # REST API (Express)
-│   └── web/        # UI (React + Vite)
-├── start.bat       # Windows launcher
-└── start.sh        # Mac/Linux launcher
-```
-
----
-
-## 🔧 Manual Setup
+Mac or Linux:
 
 ```bash
-# Install dependencies
-npm install
-
-# Build
-npm run build --workspace=@tsight/core
-npm run build --workspace=@tsight/api
-
-# Start API (terminal 1)
-cd packages/api && npm start
-
-# Start Web (terminal 2)  
-cd packages/web && npm run dev
+./start.sh
 ```
 
----
+Windows: double-click `start.bat`.
 
-## 🐳 Docker
+The browser opens at http://localhost:3000. Click Analyze and give it the path to a project folder.
 
-No Node.js? Use Docker:
+## What it shows
+
+Every number can be traced back to your code. This is how each one is worked out.
+
+**Imports.** TSight resolves imports the way the TypeScript compiler does, using the nearest `tsconfig.json` for each file. That covers path aliases like `@/lib/utils`, ESM imports written as `./file.js`, re-exports, `import()` and `require()`. Workspace packages in a monorepo are matched to their source folders. The overview tells you how many project imports it could resolve. If some couldn't be found, it says so, because those links are missing from everything below.
+
+**Dependents and blast radius.** The files that import a file directly, and then the files that import those, and so on. Type-only imports are included, since changing a type can break the code that uses it.
+
+**Hotspots.** Files that are complex and imported by many other files. The score is the file's total cyclomatic complexity times the number of source files that import it. For example, complexity 18 and 34 dependents gives 612.
+
+**Complexity.** Standard cyclomatic complexity: 1, plus 1 for each `if`, `?:`, loop, `case`, `catch`, `&&`, `||` and `??`. Every function, method, constructor and named arrow function gets its own score. An inline callback, like the one you pass to `map` or `useEffect`, counts toward the function it sits in.
+
+**Cycles.** Groups of files that import each other in a loop, found with a strongly connected components search. Type-only imports and `import()` calls are left out, because they can't cause load-order problems at runtime.
+
+**Duplicate files.** Files with the same code once whitespace and comments are ignored. Each group says whether the files are also identical byte for byte.
+
+**Structural twins.** Functions whose syntax is the same once you ignore variable names and literal values. These are usually copies. Each pair says whether the names and values match too.
+
+**Files with no importers.** Source files that nothing imports and that no entry-point rule covers. Entry points come from `package.json` (`main`, `exports`, `bin` and scripts), `<script>` tags in HTML files, Next.js file conventions, tool config files and test files. TSight says "no importers found", not "unused", because a file can still be loaded in a way it can't see.
+
+**Git history.** Churn, ownership, bus factor and knowledge gaps, read from your local `.git` folder. No token or network access is needed. Names go through `.mailmap`, renamed files keep their history, and merge commits are skipped. If you analyze a subfolder, history is matched to that folder.
+
+## What it doesn't do
+
+- It doesn't guess what a file is for from its name. Folders are shown as folders.
+- It doesn't produce a single health grade. You get the counts behind it instead.
+- It doesn't send your code anywhere.
+- It reads code, it doesn't run it. Anything decided at runtime, such as `import(someVariable)`, isn't followed.
+
+## Docker
 
 ```bash
-# Build
 docker build -t tsight .
-
-# Run (mount your code folder)
 docker run -p 3000:3000 -v "/path/to/your/code:/code" tsight
 ```
 
-Open http://localhost:3000 and enter `/code/YourProject`
+Open http://localhost:3000 and enter a path under `/code`, for example `/code/my-project`. If you open TSight from another machine on your network, add that host name with `-e TSIGHT_ALLOWED_HOSTS=192.168.1.20`.
 
----
+## Running it from source
 
-## 📋 Requirements
+```bash
+npm install
+npm run build
+npm test
+```
 
-- **Node.js 18+** or **Docker**
-- Works on **any TypeScript/React** project
+During development, `npm run dev` starts the API on port 3001 and the web UI on port 3000.
 
----
+The code is split into three packages:
 
-## 🤝 Contributing
+- `packages/core`: the analysis engine. Everything that produces a number lives here, with tests in `packages/core/test`.
+- `packages/api`: a small Express server that calls core.
+- `packages/web`: the React UI.
 
-Contributions welcome! Please read the code, run it locally, and submit a PR.
+## Contributing
 
----
+Issues and pull requests are welcome. If you change how a number is calculated, add a test in `packages/core/test` that shows the case it fixes.
 
-## 📄 License
+## License
 
 MIT
-
----
-
-<p align="center">
-  <strong>TSight: See your code. For real.</strong>
-</p>

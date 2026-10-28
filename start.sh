@@ -1,132 +1,51 @@
 #!/bin/bash
+# Start TSight: installs what's needed, builds, and opens the browser.
+
+cd "$(dirname "$0")" || exit 1
 
 echo ""
-echo "============================================================"
-echo ""
-echo "  TSight - TypeScript Code Analyzer"
-echo ""
-echo "  Understand any codebase in 30 seconds."
+echo "  TSight"
+echo "  Understand any TypeScript codebase in 30 seconds."
 echo "  No AI. No guessing. Just facts from your code."
 echo ""
-echo "============================================================"
-echo ""
 
-# Check if Node.js is installed
 if ! command -v node &> /dev/null; then
-    echo "  [ERROR] Node.js is not installed!"
-    echo ""
-    echo "  TSight requires Node.js 18 or higher."
-    echo ""
-    echo "  Install from: https://nodejs.org/"
-    echo ""
-    echo "  Or use your package manager:"
-    echo "    Mac:   brew install node"
-    echo "    Linux: sudo apt install nodejs npm"
-    echo ""
+    echo "  Node.js is not installed. TSight needs Node.js 20 or newer."
+    echo "  Get it from https://nodejs.org/ (or: brew install node)"
     exit 1
 fi
 
-NODE_VERSION=$(node -v)
-echo "  [1/4] Node.js detected: $NODE_VERSION"
-echo ""
-
-# Install dependencies if needed
-if [ ! -d "node_modules" ]; then
-    echo "  [2/4] Installing dependencies... (first run, may take a minute)"
-    npm install
-    if [ $? -ne 0 ]; then
-        echo ""
-        echo "  [ERROR] npm install failed. Check your internet connection."
-        exit 1
-    fi
-    echo "        Done!"
-else
-    echo "  [2/4] Dependencies installed"
-fi
-echo ""
-
-# Build if needed
-if [ ! -d "packages/core/dist" ]; then
-    echo "  [3/4] Building core..."
-    npm run build --workspace=@tsight/core
-    if [ $? -ne 0 ]; then
-        echo "  [ERROR] Build failed."
-        exit 1
-    fi
-    echo "        Done!"
-else
-    echo "  [3/4] Core ready"
+NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
+if [ "$NODE_MAJOR" -lt 20 ]; then
+    echo "  You have Node.js $(node -v). TSight needs 20 or newer."
+    exit 1
 fi
 
-if [ ! -d "packages/api/dist" ]; then
-    echo "        Building API..."
-    npm run build --workspace=@tsight/api
-    if [ $? -ne 0 ]; then
-        echo "  [ERROR] Build failed."
-        exit 1
-    fi
-    echo "        Done!"
-else
-    echo "        API ready"
-fi
+echo "  [1/3] Installing dependencies (quick if nothing changed)..."
+npm install --no-audit --no-fund --loglevel=error || { echo "  npm install failed. Check your connection."; exit 1; }
+
+echo "  [2/3] Building..."
+npm run build -w @tsight/core --silent && npm run build -w @tsight/api --silent || { echo "  Build failed."; exit 1; }
+
+echo "  [3/3] Starting. The UI is at http://localhost:3000 (API on 3001). Press Ctrl+C to stop."
 echo ""
 
-# Start servers
-echo "  [4/4] Starting TSight..."
-echo ""
-echo "  ------------------------------------------------------------"
-echo ""
-echo "    API server:  http://localhost:3001"
-echo "    Web UI:      http://localhost:3000"
-echo ""
-echo "    Waiting for servers to start..."
-echo ""
-echo "  ------------------------------------------------------------"
-echo ""
-echo "    Press Ctrl+C to stop"
-echo ""
-
-# Cleanup function
 cleanup() {
-    echo ""
-    echo "  Stopping servers..."
-    kill $API_PID 2>/dev/null
-    kill $WEB_PID 2>/dev/null
+    kill $API_PID $WEB_PID 2>/dev/null
     exit 0
 }
+trap cleanup INT TERM
 
-trap cleanup INT
-
-# Start API in background
-cd packages/api
-npm start 2>/dev/null &
+(cd packages/api && npm start --silent) &
 API_PID=$!
-cd ../..
-
-# Wait for API to start
-sleep 3
-
-# Start Web UI in background
-cd packages/web
-npm run dev &
+(cd packages/web && npm run dev --silent) &
 WEB_PID=$!
-cd ../..
 
-# Wait for Vite to be ready
-echo "  Waiting for Vite dev server..."
-sleep 5
-
-# Open browser (works on Mac and Linux)
-echo "  Opening browser..."
+sleep 4
 if command -v open &> /dev/null; then
-    open http://localhost:3000  # Mac
+    open http://localhost:3000
 elif command -v xdg-open &> /dev/null; then
-    xdg-open http://localhost:3000  # Linux
+    xdg-open http://localhost:3000 >/dev/null 2>&1
 fi
 
-echo ""
-echo "  TSight is running!"
-echo ""
-
-# Wait for both processes
 wait

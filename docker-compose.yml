@@ -1,12 +1,8 @@
-# TSight Docker Compose
-# 
-# Usage:
-#   1. Edit the volume path below to point to your code folder
-#   2. Run: docker-compose up
-#   3. Open http://localhost:3000
-#   4. Enter /code/YourProject to analyze
-
-version: '3.8'
+# Run TSight with Docker Compose.
+#
+# 1. Change the volume below to the folder that holds your code.
+# 2. Run: docker compose up
+# 3. Open http://localhost:3000 and enter a path under /code, for example /code/my-project
 
 services:
   tsight:
@@ -14,9 +10,9 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      # 👇 CHANGE THIS to your code folder
-      # Windows: - "C:/Projects:/code"
-      # Mac/Linux: - "/home/user/projects:/code"
+      # Change this to your code folder.
+      # Windows:   - "C:/Projects:/code"
+      # Mac/Linux: - "/home/me/projects:/code"
       - "./:/code"
     environment:
       - NODE_ENV=production
