@@ -55,12 +55,9 @@ interface BlastRadius {
   summary: string;
 }
 
-interface HealthScore {
-  score: number;
-  grade: string;
-  color: string;
-  breakdown: Array<{ rule: string; penalty: number; count: number; items?: string[] }>;
-  summary: string;
+interface CodebaseFacts {
+  resolution: { internal: number; projectImports: number; unresolved: number; percentResolved: number };
+  items: Array<{ rule: string; count: number; items: string[] }>;
 }
 
 interface GitChurn {
@@ -124,7 +121,6 @@ function App() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [selectedFile, setSelectedFile] = useState<FileDetail | null>(null);
   const [loadingFile, setLoadingFile] = useState(false);
-  const [showUnusedFiles, setShowUnusedFiles] = useState(false);
   const [activeInsight, setActiveInsight] = useState<string | null>(null);
   const [blastRadius, setBlastRadius] = useState<BlastRadius | null>(null);
   const [loadingBlast, setLoadingBlast] = useState(false);
@@ -132,7 +128,7 @@ function App() {
   const [walkthroughStep, setWalkthroughStep] = useState(0);
   
   // Phase 1 & 2 state
-  const [healthScore, setHealthScore] = useState<HealthScore | null>(null);
+  const [facts, setFacts] = useState<CodebaseFacts | null>(null);
   const [gitChurn, setGitChurn] = useState<GitChurn[]>([]);
   const [gitOwnership, setGitOwnership] = useState<GitOwnership[]>([]);
   const [busFactor, setBusFactor] = useState<{ riskPercent: number; totalSingleAuthorFiles: number; busFactor: BusFactor[] } | null>(null);
@@ -142,7 +138,6 @@ function App() {
   const [expandedBusFactorAuthor, setExpandedBusFactorAuthor] = useState<string | null>(null);
   const [ownershipTimeFilter, setOwnershipTimeFilter] = useState<'all' | '6months' | '3months'>('all');
   const [knowledgeGaps, setKnowledgeGaps] = useState<KnowledgeGap[]>([]);
-  const [ownershipStats, setOwnershipStats] = useState<{ filesWithActivity: number; filesWithoutActivity: number; totalFiles: number } | null>(null);
   const [expandedKnowledgeGaps, setExpandedKnowledgeGaps] = useState(false);
   const [godFiles, setGodFiles] = useState<Array<{ file: string; name: string; lines: number; exports: number; functions: number; reasons: string[] }>>([]);
   const [complexFunctions, setComplexFunctions] = useState<Array<{ file: string; name: string; complexity: number; line: number }>>([]);
@@ -213,7 +208,7 @@ function App() {
       
       // Fetch health score
       const healthRes = await safeFetch('/api/health-score');
-      if (healthRes.success) setHealthScore(healthRes.healthScore);
+      if (healthRes.success) setFacts(healthRes.facts);
       
       // Fetch god files
       const godRes = await safeFetch('/api/god-files');
@@ -248,7 +243,6 @@ function App() {
       if (ownershipRes.success) {
         setGitOwnership(ownershipRes.ownership);
         setKnowledgeGaps(ownershipRes.knowledgeGaps || []);
-        setOwnershipStats(ownershipRes.stats || null);
       }
       if (busRes.success) setBusFactor({ riskPercent: busRes.riskPercent, totalSingleAuthorFiles: busRes.totalSingleAuthorFiles, busFactor: busRes.busFactor });
       
@@ -268,7 +262,6 @@ function App() {
       if (res.success) {
         setGitOwnership(res.ownership);
         setKnowledgeGaps(res.knowledgeGaps || []);
-        setOwnershipStats(res.stats || null);
       }
     } catch (err) {
       console.error('Failed to fetch ownership', err);
@@ -414,7 +407,7 @@ graph TD
         const layers = analysis.mentalModel.layers;
         
         // Create subgraphs for each layer
-        layers.forEach((layer, i) => {
+        layers.forEach((layer) => {
           const layerId = layer.name.replace(/[^a-zA-Z0-9]/g, '');
           const icon = layer.name.toLowerCase().includes('ui') || layer.name.toLowerCase().includes('component') ? '🖥️' :
                        layer.name.toLowerCase().includes('service') || layer.name.toLowerCase().includes('logic') ? '⚙️' :
@@ -710,7 +703,6 @@ These files have identical content — consider consolidating:
     finally { setLoadingBlast(false); }
   };
 
-  const filteredIssues = analysis?.issues.filter(i => showUnusedFiles || i.type !== 'dead-code') || [];
   const confirmedIssues = analysis?.issues.filter(i => i.type !== 'dead-code') || [];
   const unusedFileIssues = analysis?.issues.filter(i => i.type === 'dead-code') || [];
 
@@ -765,94 +757,34 @@ These files have identical content — consider consolidating:
             <div className="content-area" role="tabpanel">
               {activeTab === 'overview' && (
                 <>
-                  {/* Health Score Card */}
-                  {healthScore && (
-                    <div className="health-score-banner" style={{ 
-                      background: 'var(--bg2)', 
-                      border: '1px solid var(--border)', 
-                      borderRadius: 'var(--radius)', 
-                      padding: 'var(--space-md)', 
-                      marginBottom: 'var(--space-lg)' 
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-lg)' }}>
-                        <div style={{ textAlign: 'center', minWidth: '100px' }}>
-                          <div style={{ 
-                            fontSize: '3rem', 
-                            fontWeight: 700, 
-                            color: healthScore.color,
-                            lineHeight: 1
-                          }}>{healthScore.score}</div>
-                          <div style={{ 
-                            fontSize: '0.875rem', 
-                            color: 'var(--text3)',
-                            marginTop: '4px'
-                          }}>out of 100</div>
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 600, marginBottom: 'var(--space-xs)', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-                            <span>📊</span>
-                            <span>Codebase Health Score</span>
-                          </div>
-                          <div style={{ color: 'var(--text2)', marginBottom: 'var(--space-sm)', fontSize: '0.875rem' }}>{healthScore.summary}</div>
-                          {healthScore.breakdown.length > 0 && (
-                            <>
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text3)', marginBottom: 'var(--space-sm)' }}>
-                                👇 Click to see details
-                              </div>
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                                {healthScore.breakdown.map((b, i) => {
-                                  // Determine if this item has a corresponding card
-                                  const hasCard = b.rule.includes('Circular') || b.rule.includes('Large') || b.rule.includes('Duplicate') || b.rule.includes('issues');
-                                  const isComplexity = b.rule.includes('complexity');
-                                  
-                                  // Softer colors based on penalty severity
-                                  const severityColor = b.penalty >= 20 ? 'var(--danger)' : 
-                                                        b.penalty >= 15 ? 'var(--warning)' : 
-                                                        'var(--text2)';
-                                  
-                                  return (
-                                    <button 
-                                      key={i} 
-                                      onClick={() => {
-                                        if (b.rule.includes('Circular')) setActiveInsight('circular');
-                                        else if (b.rule.includes('Duplicate')) setActiveTab('issues');
-                                        else if (b.rule.includes('Large') || b.rule.includes('God')) setActiveInsight('god-files');
-                                        else if (b.rule.includes('complexity')) setShowComplexFunctions(true);
-                                        else if (b.rule.includes('issues')) setActiveTab('issues');
-                                      }}
-                                      className="health-breakdown-item"
-                                      title={isComplexity ? 'Click to see complex functions' : hasCard ? 'Click to see details below' : ''}
-                                      style={{ 
-                                        fontSize: '0.75rem', 
-                                        background: 'var(--bg)', 
-                                        padding: '6px 12px', 
-                                        borderRadius: 'var(--radius-sm)', 
-                                        border: '1px solid var(--border)', 
-                                        cursor: 'pointer', 
-                                        transition: 'all 0.15s',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '6px',
-                                        color: 'var(--text)'
-                                      }}
-                                    >
-                                      <span style={{ color: severityColor, fontWeight: 600 }}>-{b.penalty}</span>
-                                      <span>{b.rule}</span>
-                                      <span style={{ 
-                                        background: 'var(--bg3)', 
-                                        padding: '2px 6px', 
-                                        borderRadius: '10px',
-                                        fontSize: '0.7rem',
-                                        color: 'var(--text2)'
-                                      }}>{b.count}</span>
-                                      <span style={{ opacity: 0.5, marginLeft: '2px' }}>→</span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </>
-                          )}
-                        </div>
+                  {facts && (
+                    <div className="health-score-banner" style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 'var(--space-md)', marginBottom: 'var(--space-lg)' }}>
+                      <div style={{ fontWeight: 600, marginBottom: 'var(--space-xs)' }}>
+                        Resolved {facts.resolution.internal.toLocaleString()} of {facts.resolution.projectImports.toLocaleString()} project imports ({facts.resolution.percentResolved}%)
+                      </div>
+                      <div style={{ color: 'var(--text2)', marginBottom: 'var(--space-sm)', fontSize: '0.875rem' }}>
+                        {facts.resolution.unresolved === 0
+                          ? 'Every import of project code was matched to a file, so the numbers below cover the whole graph.'
+                          : `${facts.resolution.unresolved} imports point at project code that could not be found. Numbers that depend on imports may be missing those links.`}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {facts.items.map((b) => (
+                          <button
+                            key={b.rule}
+                            onClick={() => {
+                              if (b.rule.includes('cycle')) setActiveInsight('circular');
+                              else if (b.rule.includes('Duplicate')) setActiveTab('issues');
+                              else if (b.rule.includes('500 lines')) setActiveInsight('god-files');
+                              else if (b.rule.includes('complexity')) setShowComplexFunctions(true);
+                            }}
+                            className="health-breakdown-item"
+                            title={b.items.join('\n')}
+                            style={{ fontSize: '0.75rem', background: 'var(--bg)', padding: '6px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text)' }}
+                          >
+                            <span style={{ fontWeight: 600 }}>{b.count}</span>
+                            <span>{b.rule}</span>
+                          </button>
+                        ))}
                       </div>
                     </div>
                   )}
@@ -2769,7 +2701,7 @@ function BlastRadiusModal({ blastRadius, loading, onClose, onFileClick }: { blas
   };
   
   // Group files by folder
-  const groupByFolder = (files: Array<{ file: string; name: string }>, levelIndex: number) => {
+  const groupByFolder = (files: Array<{ file: string; name: string }>) => {
     const groups: Record<string, Array<{ file: string; name: string }>> = {};
     for (const f of files) {
       const parts = f.file.split('/');
@@ -2856,7 +2788,7 @@ function BlastRadiusModal({ blastRadius, loading, onClose, onFileClick }: { blas
                 </div>
                 
                 {blastRadius.levels.map((level, levelIdx) => {
-                  const folderGroups = groupByFolder(level.files, levelIdx);
+                  const folderGroups = groupByFolder(level.files);
                   
                   return (
                     <div key={levelIdx} className="tree-level">
