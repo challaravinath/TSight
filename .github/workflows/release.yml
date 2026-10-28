@@ -1,5 +1,6 @@
-# Push a tag like v3.0.0 to publish a GitHub release. The notes come from that
-# version's section in CHANGELOG.md, and a sample report is attached.
+# Push a tag like v3.0.1 to publish a release: the npm packages (through npm's
+# trusted publishing, so no token is stored anywhere) and a GitHub release with
+# notes from that version's section in CHANGELOG.md and a sample report attached.
 name: Release
 
 on:
@@ -8,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # lets npm confirm the packages were built by this workflow
 
 jobs:
   release:
@@ -20,6 +22,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm run build
       - run: npm test
@@ -45,6 +50,18 @@ jobs:
             echo "::error::CHANGELOG.md has no section for $version"
             exit 1
           fi
+
+      - name: Publish to npm
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # In dependency order. A version that is already on npm is skipped, so the job can be re-run.
+          for pkg in @tsight/core @tsight/api tsight; do
+            if npm view "$pkg@$version" version >/dev/null 2>&1; then
+              echo "$pkg@$version is already on npm"
+            else
+              npm publish -w "$pkg"
+            fi
+          done
 
       - name: Sample report of TSight itself
         run: node packages/cli/dist/cli.js report . --out "tsight-report-${GITHUB_REF_NAME}.html"
