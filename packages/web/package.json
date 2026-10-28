@@ -1,6 +1,6 @@
 {
   "name": "@tsight/web",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "description": "TSight Web UI",
   "type": "module",
   "scripts": {

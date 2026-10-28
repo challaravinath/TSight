@@ -71,6 +71,10 @@ export async function analyzeDiff(
   const root = path.resolve(projectPath);
   const headRef = options.head ?? 'HEAD';
   const useWorkingTree = options.head === undefined;
+  for (const ref of [options.base, headRef]) {
+    // A ref starting with "-" would be read by git as an option.
+    if (!ref || ref.startsWith('-')) throw new Error(`Not a valid git ref: ${ref}`);
+  }
 
   let mergeBase: string;
   try {
