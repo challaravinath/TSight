@@ -1,6 +1,6 @@
 {
   "name": "tsight",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Understand any TypeScript codebase in 30 seconds. No AI. No guessing. Just facts from your code.",
   "type": "module",
   "bin": {
@@ -18,8 +18,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tsight/api": "*",
-    "@tsight/core": "*"
+    "@tsight/api": "^3.0.1",
+    "@tsight/core": "^3.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
@@ -29,6 +29,24 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/challaravinath/TSight"
-  }
+    "url": "git+https://github.com/challaravinath/TSight.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/challaravinath/TSight#readme",
+  "bugs": {
+    "url": "https://github.com/challaravinath/TSight/issues"
+  },
+  "keywords": [
+    "typescript",
+    "javascript",
+    "static-analysis",
+    "code-analysis",
+    "dependency-graph",
+    "git",
+    "codebase",
+    "complexity",
+    "cli",
+    "github-action",
+    "code-review"
+  ]
 }

@@ -11,7 +11,15 @@ It runs on your machine. Your code stays there.
 
 ## Quick start
 
-You need Node.js 20 or newer and git.
+You need Node.js 20 or newer and git. In any project folder:
+
+```bash
+npx tsight
+```
+
+The browser opens at http://localhost:4300 with the analysis. To analyze another folder, pass its path: `npx tsight /path/to/project`.
+
+To run it from source instead:
 
 ```bash
 git clone https://github.com/challaravinath/TSight.git
@@ -21,7 +29,7 @@ npm run build
 npx tsight /path/to/your/project
 ```
 
-The browser opens at http://localhost:4300 with the analysis. On Mac or Linux you can also run `./start.sh /path/to/your/project`, and on Windows `start.bat C:\path\to\project`. Both install, build and start in one go.
+On Mac or Linux you can also run `./start.sh /path/to/your/project` from the clone, and on Windows `start.bat C:\path\to\project`. Both install, build and start in one go.
 
 ## The command
 
@@ -148,7 +156,7 @@ The code is in four packages:
 - `packages/core`: the analysis. Everything that produces a number lives here, with tests in `packages/core/test`.
 - `packages/api`: a small server that runs the analysis in a worker thread.
 - `packages/web`: the React UI. It reads one snapshot and computes the rest in the browser.
-- `packages/cli`: the `tsight` command.
+- `packages/cli`: the `tsight` command, published on npm as `tsight`. The engine and server are published as `@tsight/core` and `@tsight/api`.
 
 More detail on each screen is in the [guide](GUIDE.md).
 

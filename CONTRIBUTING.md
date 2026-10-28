@@ -38,3 +38,15 @@ Text in the UI, the docs and the command line should be plain and direct. Say wh
 ## Pull requests
 
 Every pull request gets a comment from TSight itself, showing what the change touches. If it reports a new dependency cycle, the check fails; fix the cycle or explain in the pull request why it is fine.
+
+## Releases
+
+1. Set the new version everywhere with `npm version 3.1.0 --workspaces --include-workspace-root --no-git-tag-version`, and add a section for it at the top of CHANGELOG.md. For a new major version, also update the `@tsight/core` and `@tsight/api` versions listed under `dependencies` in the other packages. Merge that as a pull request.
+2. Tag the merge on `main` and push the tag: `git tag v3.1.0` then `git push origin v3.1.0`.
+3. The release workflow runs the tests, submits the three npm packages to npm's staging area, and creates the GitHub release.
+4. A maintainer approves the staged packages on npmjs.com under Staged Packages, in the order `@tsight/core`, `@tsight/api`, `tsight`. Nothing reaches users before that.
+
+
+### Testing the release process
+
+A version with a hyphen, like `3.0.2-rc.0`, is a test release. It goes to npm under the `next` label instead of `latest`, so people running `npx tsight` keep getting the current version, and the GitHub release is marked as a pre-release. It doesn't need a changelog section. Tag it from a branch so `main` keeps the real version, and install it with `npx tsight@next`.

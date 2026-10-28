@@ -1,6 +1,6 @@
 {
   "name": "@tsight/core",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "TSight analysis engine: files, imports, complexity and git history for TypeScript projects",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,5 +19,41 @@
     "@types/node": "^20.10.0",
     "typescript": "^5.3.0",
     "vitest": "^3.2.4"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/challaravinath/TSight#readme",
+  "bugs": {
+    "url": "https://github.com/challaravinath/TSight/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/challaravinath/TSight.git",
+    "directory": "packages/core"
+  },
+  "keywords": [
+    "typescript",
+    "javascript",
+    "static-analysis",
+    "code-analysis",
+    "dependency-graph",
+    "git",
+    "codebase",
+    "complexity"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

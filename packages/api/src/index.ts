@@ -9,7 +9,6 @@
  *   TSIGHT_CORS_ORIGIN      allowed origins, comma separated
  *   TSIGHT_WEB_DIR          folder with the built web UI
  */
-import 'dotenv/config';
 import { pathToFileURL } from 'url';
 import { createServer } from './server.js';
 
@@ -19,6 +18,8 @@ const list = (v: string | undefined) => (v ? v.split(',').map((s) => s.trim()).f
 
 const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain || process.env.TSIGHT_START === '1') {
+  // Only the standalone server reads a .env file. The tsight command must not pick up the analyzed project's .env.
+  await import('dotenv/config');
   const server = createServer({
     port: Number(process.env.PORT) || 3001,
     host: process.env.HOST || '127.0.0.1',

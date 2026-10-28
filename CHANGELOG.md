@@ -2,6 +2,15 @@
 
 All notable changes to TSight. Versions follow [semantic versioning](https://semver.org): a change to the snapshot format or the command line options that breaks existing use goes in a new major version.
 
+## 3.0.1 (2026-10-28)
+
+### New
+- TSight is on npm. Run `npx tsight` in any project folder, with no clone or build.
+- The engine and server are published too, as `@tsight/core` and `@tsight/api`, for building your own reports and checks.
+
+### Fixed
+- The `tsight` command no longer reads the analyzed project's `.env` file. Only the standalone server does.
+
 ## 3.0.0 (2026-10-28)
 
 ### New

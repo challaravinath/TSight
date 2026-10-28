@@ -56,7 +56,8 @@ describe('resolution edge cases', () => {
     // Simulate a build and an installed workspace link.
     writeFile(root, 'packages/core/dist/index.d.ts', 'export declare const core: number;\n');
     fs.mkdirSync(path.join(root, 'node_modules', '@x'), { recursive: true });
-    fs.symlinkSync(path.join(root, 'packages', 'core'), path.join(root, 'node_modules', '@x', 'core'), 'dir');
+    // Junctions, because Windows only allows ordinary directory symlinks with admin rights or Developer Mode.
+    fs.symlinkSync(path.join(root, 'packages', 'core'), path.join(root, 'node_modules', '@x', 'core'), 'junction');
     const after = edges(await analyzeProject(root));
     expect(before).toEqual(['packages/app/src/main.ts -> packages/core/src/index.ts [internal]']);
     expect(after).toEqual(before);
@@ -80,9 +81,9 @@ describe('resolution edge cases', () => {
       'packages/a/src/index.ts': "import { b } from 'b';\nexport const a = b;\n",
     });
     fs.mkdirSync(path.join(real, 'node_modules'), { recursive: true });
-    fs.symlinkSync(path.join(real, 'packages', 'b'), path.join(real, 'node_modules', 'b'), 'dir');
+    fs.symlinkSync(path.join(real, 'packages', 'b'), path.join(real, 'node_modules', 'b'), 'junction');
     const link = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tsight-link-')), 'project');
-    fs.symlinkSync(real, link, 'dir');
+    fs.symlinkSync(real, link, 'junction');
     expect(edges(await analyzeProject(link))).toEqual(['packages/a/src/index.ts -> packages/b/src/index.ts [internal]']);
   });
 

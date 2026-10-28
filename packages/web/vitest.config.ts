@@ -6,5 +6,8 @@ export default defineConfig({
   test: {
     testTimeout: 60_000,
     hookTimeout: 120_000,
+    // Test projects are written with LF line endings. Keep git on Windows from converting
+    // them and printing a warning for every file.
+    env: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.autocrlf', GIT_CONFIG_VALUE_0: 'false' },
   },
 });

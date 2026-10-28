@@ -1,12 +1,18 @@
 version: 2
 updates:
+  # Minor and patch updates arrive together once a month. Major versions often need code
+  # changes (React, Express, TypeScript, ts-morph, Vite), so they are upgraded by hand,
+  # one at a time, instead of in a single pull request that cannot pass.
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: monthly
     groups:
-      dependencies:
-        patterns: ['*']
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
     open-pull-requests-limit: 5
   - package-ecosystem: github-actions
     directory: /
