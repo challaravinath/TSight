@@ -116,10 +116,10 @@ function Report({ m, d }: { m: Model; d: DiffReport }) {
         <div className="panel answer risk">
           <h2>Reach</h2>
           <div className="big">
-            {fmt(d.blastRadius.files)} <small>files depend on what changed</small>
+            {fmt(d.blastRadius.files)} <small>other files depend on what changed</small>
           </div>
           <div className="formula">
-            <span>{d.blastRadius.percent}% of source files, including <Proof of={entryProof}>{plural(d.blastRadius.entryPoints.length, 'entry point')}</Proof></span>
+            <span>{d.blastRadius.percent}% of the project, including <Proof of={entryProof}>{plural(d.blastRadius.entryPoints.length, 'entry point')}</Proof></span>
           </div>
           <div className="next">From {plural(source, 'changed source file')}, following imports backwards.</div>
         </div>

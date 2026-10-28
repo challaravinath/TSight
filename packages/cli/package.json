@@ -14,7 +14,8 @@
   },
   "scripts": {
     "build": "tsc && node scripts/copy-web.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@tsight/api": "*",
@@ -22,7 +23,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vitest": "^3.2.4"
   },
   "license": "MIT",
   "repository": {

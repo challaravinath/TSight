@@ -14,8 +14,8 @@
   ],
   "scripts": {
     "build": "npm run build -w @tsight/core && npm run build -w @tsight/api && npm run build -w @tsight/web && npm run build -w tsight",
-    "test": "npm run test -w @tsight/core",
-    "typecheck": "npm run typecheck -w @tsight/core && npm run typecheck -w @tsight/api && npm run typecheck -w tsight",
+    "test": "npm run test -w @tsight/core && npm run test -w @tsight/web && npm run test -w tsight",
+    "typecheck": "npm run typecheck -w @tsight/core && npm run typecheck -w @tsight/api && npm run typecheck -w @tsight/web && npm run typecheck -w tsight",
     "dev": "concurrently \"npm run dev --workspace=@tsight/api\" \"npm run dev --workspace=@tsight/web\"",
     "start": "npm run start --workspace=@tsight/api",
     "tsight": "node packages/cli/dist/cli.js"

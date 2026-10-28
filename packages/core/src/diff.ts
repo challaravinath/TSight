@@ -366,7 +366,7 @@ export function diffToMarkdown(r: DiffReport): string {
   out.push(`| | |`);
   out.push(`| --- | --- |`);
   out.push(
-    `| Blast radius | ${r.blastRadius.files} file${r.blastRadius.files === 1 ? '' : 's'} reachable through imports (${r.blastRadius.percent}%)` +
+    `| Blast radius | ${r.blastRadius.files} other file${r.blastRadius.files === 1 ? '' : 's'} import the changed files, directly or indirectly (${r.blastRadius.percent}% of the project)` +
       (r.blastRadius.entryPoints.length > 0 ? `, including ${r.blastRadius.entryPoints.length} entry point${r.blastRadius.entryPoints.length === 1 ? '' : 's'}` : '') +
       ' |',
   );

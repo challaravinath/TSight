@@ -1,0 +1,93 @@
+name: TSight change report
+description: Comment on a pull request with what it touches, from the code and its git history. No AI.
+author: challaravinath
+branding:
+  icon: search
+  color: blue
+
+inputs:
+  base:
+    description: Branch to compare with. Defaults to the pull request's base branch.
+    required: false
+    default: ''
+  path:
+    description: Folder to analyze, relative to the repository root.
+    required: false
+    default: '.'
+  fail-on:
+    description: "Fail the check when the change adds any of these, comma separated. Supported: new-cycle"
+    required: false
+    default: ''
+  comment:
+    description: Post the report as a pull request comment, updated on each push. Needs pull-requests write permission.
+    required: false
+    default: 'true'
+
+outputs:
+  report:
+    description: Path to the Markdown report.
+    value: ${{ steps.diff.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Build TSight
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        npm ci --no-audit --no-fund --loglevel=error
+        npm run build --silent
+
+    - name: Compare with the base branch
+      id: diff
+      shell: bash
+      env:
+        BASE: ${{ inputs.base || github.base_ref || 'main' }}
+        TARGET: ${{ inputs.path }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        CLI: ${{ github.action_path }}/packages/cli/dist/cli.js
+        OUT: ${{ runner.temp }}/tsight-report.md
+      run: |
+        # The comparison needs the base branch and enough history to find where the change split off.
+        if ! git rev-parse --verify --quiet "origin/$BASE" >/dev/null; then
+          git fetch --no-tags origin "$BASE:refs/remotes/origin/$BASE"
+        fi
+        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+          echo "::notice::This checkout is shallow. Set fetch-depth: 0 on actions/checkout for full authorship and co-change history."
+        fi
+        status=0
+        node "$CLI" diff "origin/$BASE" --path "$TARGET" --out "$OUT" ${FAIL_ON:+--fail-on "$FAIL_ON"} || status=$?
+        echo "report=$OUT" >> "$GITHUB_OUTPUT"
+        echo "status=$status" >> "$GITHUB_OUTPUT"
+        if [ -f "$OUT" ]; then cat "$OUT" >> "$GITHUB_STEP_SUMMARY"; fi
+        # Exit code 1 means a --fail-on rule matched. Report it after the comment is posted.
+        if [ "$status" -gt 1 ]; then exit "$status"; fi
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      continue-on-error: true
+      env:
+        REPORT: ${{ steps.diff.outputs.report }}
+      with:
+        script: |
+          const fs = require('fs');
+          const marker = '<!-- tsight-change-report -->';
+          const body = `${marker}\n${fs.readFileSync(process.env.REPORT, 'utf8')}\n\n<sub>From TSight. Facts from the code and its git history, no AI.</sub>`;
+          const { owner, repo } = context.repo;
+          const issue_number = context.payload.pull_request.number;
+          const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+          const mine = comments.find((c) => c.body && c.body.startsWith(marker));
+          if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+          else await github.rest.issues.createComment({ owner, repo, issue_number, body });
+
+    - name: Apply fail-on rules
+      if: steps.diff.outputs.status == '1'
+      shell: bash
+      run: |
+        echo "::error::TSight: this change matched a fail-on rule (${{ inputs.fail-on }}). See the report above."
+        exit 1
