@@ -69,6 +69,8 @@ npm test
 
 During development, `npm run dev` starts the API on port 3001 and the web UI on port 3000.
 
+To check the numbers against three real repositories pinned to exact commits, run `TSIGHT_CORPUS=1 npm test`. It clones about 150 MB the first time, so it isn't part of the normal test run.
+
 The code is split into three packages:
 
 - `packages/core`: the analysis engine. Everything that produces a number lives here, with tests in `packages/core/test`.
