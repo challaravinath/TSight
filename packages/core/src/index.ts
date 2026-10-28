@@ -25,3 +25,5 @@ export {
   type GitCommit,
   type TimeWindow,
 } from './git.js';
+export { changeHotspots, coChanges, MAX_FILES_PER_COMMIT, type ChangeHotspot, type CoChange, type CoChangeOptions } from './behavior.js';
+export { analyzeDiff, diffToMarkdown, parseNameStatus, parseNumstat, type DiffReport, type DiffFile } from './diff.js';
