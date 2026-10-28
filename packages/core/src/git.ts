@@ -12,6 +12,9 @@
  *   that were merged.
  * - When a file is deleted and a new one is later created at the same
  *   path, the new file does not inherit the old one's history.
+ * - Commits by automation accounts (names ending in [bot], such as
+ *   dependabot[bot]) are kept in the history but left out of churn,
+ *   ownership, bus factor and co-change: they say nothing about people.
  * - Only files that exist in the analysis are reported.
  */
 import { execFile } from 'child_process';
@@ -19,6 +22,8 @@ import { execFile } from 'child_process';
 export interface GitCommit {
   hash: string;
   author: string;
+  /** Author is an automation account (GitHub marks them with a [bot] suffix). */
+  bot: boolean;
   date: string; // ISO 8601, author date
   files: string[]; // current paths, relative to the analyzed folder
 }
@@ -123,7 +128,8 @@ export function parseLog(raw: string): GitCommit[] {
       }
     }
 
-    commits.push({ hash, author: author ?? '', date: date ?? '', files: Array.from(files) });
+    const name = author ?? '';
+    commits.push({ hash, author: name, bot: /\[bot\]$/i.test(name), date: date ?? '', files: Array.from(files) });
   }
   return commits;
 }
@@ -141,10 +147,10 @@ export function windowStart(window: TimeWindow, now = new Date()): Date | null {
   return d;
 }
 
+/** Human commits since a date (all human commits when since is null). */
 function commitsSince(commits: GitCommit[], since: Date | null): GitCommit[] {
-  if (!since) return commits;
-  const t = since.getTime();
-  return commits.filter((c) => Date.parse(c.date) >= t);
+  const t = since ? since.getTime() : -Infinity;
+  return commits.filter((c) => !c.bot && Date.parse(c.date) >= t);
 }
 
 /** Per current file: commits that touched it, by author. */
@@ -253,6 +259,7 @@ export function staleFiles(commits: GitCommit[], currentFiles: string[], months:
   const current = new Set(currentFiles);
   const last = new Map<string, string>();
   for (const c of commits) {
+    if (c.bot) continue;
     for (const f of c.files) {
       if (current.has(f) && !last.has(f)) last.set(f, c.date.slice(0, 10)); // newest first
     }

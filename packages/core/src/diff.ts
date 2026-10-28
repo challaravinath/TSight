@@ -338,6 +338,7 @@ async function blameLines(root: string, rev: string, files: string[]) {
     for (const line of out.split('\n')) {
       if (!line.startsWith('author ')) continue;
       const a = line.slice(7);
+      if (/\[bot\]$/i.test(a)) continue; // automation accounts are not people who know the code
       counts.set(a, (counts.get(a) ?? 0) + 1);
       totals.set(a, (totals.get(a) ?? 0) + 1);
       total++;

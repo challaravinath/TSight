@@ -26,7 +26,7 @@ export function changeHotspots(result: AnalysisResult, commits: GitCommit[], day
   const source = new Set(result.files.filter((f) => f.role === 'source').map((f) => f.path));
   const perFile = new Map<string, { commits: number; authors: Set<string> }>();
   for (const c of commits) {
-    if (Date.parse(c.date) < since) continue;
+    if (c.bot || Date.parse(c.date) < since) continue;
     for (const f of c.files) {
       if (!source.has(f)) continue;
       const e = perFile.get(f) ?? { commits: 0, authors: new Set<string>() };
@@ -88,7 +88,7 @@ export function coChanges(result: AnalysisResult, commits: GitCommit[], options:
   const fileCommits = new Map<string, number>();
   const pairs = new Map<string, number>();
   for (const c of commits) {
-    if (Date.parse(c.date) < sinceMs) continue;
+    if (c.bot || Date.parse(c.date) < sinceMs) continue;
     // Large commits are left out of both counts, so "14 of 16" compares like with like.
     if (c.files.length > MAX_FILES_PER_COMMIT) continue;
     const files = Array.from(new Set(c.files.filter((f) => source.has(f)))).sort();

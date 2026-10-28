@@ -77,3 +77,30 @@ describe('git history', () => {
     expect(h.available).toBe(false);
   });
 });
+
+describe('automation accounts', () => {
+  it('leaves [bot] commits out of ownership, bus factor and co-change', async () => {
+    const { coChanges } = await import('../src/index.js');
+    const root = makeProject({});
+    gitIn(root, ['init', '-q']);
+    writeFile(root, 'a.ts', 'export const a = 0;\n');
+    writeFile(root, 'b.ts', 'export const b = 0;\n');
+    gitIn(root, ['add', '.']);
+    gitIn(root, ['commit', '-q', '-m', 'start'], 'Alice');
+    for (let i = 1; i <= 6; i++) {
+      writeFile(root, 'a.ts', `export const a = ${i};\n`);
+      writeFile(root, 'b.ts', `export const b = ${i};\n`);
+      gitIn(root, ['commit', '-qam', `bump ${i}`], 'release-bot[bot]');
+    }
+    const r = await analyzeProject(root);
+    const h = await readGitHistory(root);
+    if (!h.available) throw new Error(h.reason);
+    expect(h.commits.filter((c) => c.bot)).toHaveLength(6);
+    expect(ownership(h.commits, ['a.ts', 'b.ts'], 'all').ownership.map((o) => [o.file, o.authors])).toEqual([
+      ['a.ts', ['Alice']],
+      ['b.ts', ['Alice']],
+    ]);
+    expect(busFactor(h.commits, ['a.ts', 'b.ts'], 'all').busFactor).toEqual([{ author: 'Alice', soloFiles: 2, files: ['a.ts', 'b.ts'] }]);
+    expect(coChanges(r, h.commits, { minTogether: 2 })).toEqual([]);
+  });
+});
