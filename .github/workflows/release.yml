@@ -1,6 +1,13 @@
-# Push a tag like v3.0.1 to publish a release: the npm packages (through npm's
-# trusted publishing, so no token is stored anywhere) and a GitHub release with
-# notes from that version's section in CHANGELOG.md and a sample report attached.
+# Push a tag like v3.0.2 to make a release:
+#
+# 1. The npm packages are submitted to npm's staging area through trusted
+#    publishing, so no token is stored anywhere. Nothing goes live yet.
+# 2. A GitHub release is created with notes from that version's section in
+#    CHANGELOG.md and a sample report attached.
+#
+# Then approve the staged packages on npmjs.com (Staged Packages) or with
+# `npm stage approve <id>`, in the order @tsight/core, @tsight/api, tsight.
+# Approval needs your two-factor code, so a release cannot reach users without you.
 name: Release
 
 on:
@@ -23,7 +30,7 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
-      # Trusted publishing needs npm 11.5.1 or later.
+      # Staged publishing needs npm 11.15.0 or later.
       - run: npm install -g npm@latest
       - run: npm ci
       - run: npm run build
@@ -51,15 +58,17 @@ jobs:
             exit 1
           fi
 
-      - name: Publish to npm
+      - name: Submit to npm for approval
         run: |
           version="${GITHUB_REF_NAME#v}"
-          # In dependency order. A version that is already on npm is skipped, so the job can be re-run.
-          for pkg in @tsight/core @tsight/api tsight; do
+          # A version that is already on npm is skipped, so the job can be re-run.
+          for dir in core api cli; do
+            pkg=$(node -p "require('./packages/$dir/package.json').name")
             if npm view "$pkg@$version" version >/dev/null 2>&1; then
               echo "$pkg@$version is already on npm"
             else
-              npm publish -w "$pkg"
+              (cd "packages/$dir" && npm stage publish)
+              echo "::notice::$pkg@$version is staged. Approve it on npmjs.com under Staged Packages."
             fi
           done
 
