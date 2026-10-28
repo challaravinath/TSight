@@ -12,7 +12,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import type { AnalysisResult, CycleGroup } from './types.js';
 import { analyzeProject } from './analyzer.js';
-import { readGitHistory, type GitCommit } from './git.js';
+import { readGitHistory, shallowBoundary, type GitCommit } from './git.js';
 import { coChanges } from './behavior.js';
 import { reverseEdges } from './internal/graph.js';
 import { CODE_EXTENSIONS } from './internal/discovery.js';
@@ -38,7 +38,8 @@ export interface DiffReport {
   headCommit: string;
   files: DiffFile[];
   totals: { files: number; added: number; removed: number };
-  blastRadius: { files: number; percent: number; entryPoints: string[] };
+  /** Files outside the change that import a changed file, directly or through other files. */
+  blastRadius: { files: number; percent: number; entryPoints: string[]; reached: string[] };
   complexity: {
     net: number;
     functions: Array<{ file: string; name: string; before: number | null; after: number | null }>;
@@ -48,6 +49,7 @@ export interface DiffReport {
   removedCycles: number;
   /** The clone has limited history, so authorship and co-change counts only cover what is there. */
   shallowHistory: boolean;
+  /** Everyone who wrote lines the change touches, from git blame at the merge base. */
   owners: Array<{ author: string; lines: number; percent: number }>;
   partners: Array<{ file: string; partnerOf: string; together: number; commitsOfChanged: number; hidden: boolean }>;
   resolution: { internal: number; projectImports: number; unresolved: number };
@@ -124,7 +126,12 @@ export async function analyzeDiff(
   const changedSet = new Set([...changedHead, ...relevant.map((c) => c.oldPath ?? c.path)]);
 
   // Authorship at the base, from git blame (files that existed before the change).
-  const blame = await blameLines(root, mergeBase, relevant.filter((c) => c.status !== 'added').map((c) => c.oldPath ?? c.path).slice(0, 60));
+  const blame = await blameLines(
+    root,
+    mergeBase,
+    relevant.filter((c) => c.status !== 'added').map((c) => c.oldPath ?? c.path),
+    await shallowBoundary(root),
+  );
 
   const files: DiffFile[] = relevant.map((c) => {
     const before = c.oldPath ?? c.path;
@@ -239,8 +246,7 @@ export async function analyzeDiff(
     lines,
     percent: blame.total > 0 ? Math.round((lines / blame.total) * 100) : 0,
   }))
-    .sort((a, b) => b.lines - a.lines || a.author.localeCompare(b.author))
-    .slice(0, 5);
+    .sort((a, b) => b.lines - a.lines || a.author.localeCompare(b.author));
 
   return {
     base: options.base,
@@ -257,8 +263,9 @@ export async function analyzeDiff(
       files: reached.size,
       percent: head.files.length > 0 ? Math.round((reached.size / head.files.length) * 1000) / 10 : 0,
       entryPoints,
+      reached: Array.from(reached).sort(),
     },
-    complexity: { net, functions: fnChanges.slice(0, 20) },
+    complexity: { net, functions: fnChanges },
     newCycles,
     removedCycles,
     shallowHistory,
@@ -327,28 +334,44 @@ export function parseNumstat(raw: string): Map<string, { added: number; removed:
   return out;
 }
 
-async function blameLines(root: string, rev: string, files: string[]) {
+async function blameLines(root: string, rev: string, files: string[], skip: Set<string>) {
   const byFile = new Map<string, Map<string, number>>();
   const totals = new Map<string, number>();
   let total = 0;
-  for (const file of files) {
+  const one = async (file: string) => {
     let out: string;
     try {
       out = await git(root, ['blame', '--line-porcelain', '-w', rev, '--', file]);
     } catch {
-      continue; // binary or missing at that revision
+      return; // binary or missing at that revision
     }
     const counts = new Map<string, number>();
+    let hash = '';
+    let author = '';
     for (const line of out.split('\n')) {
-      if (!line.startsWith('author ')) continue;
-      const a = line.slice(7);
-      if (/\[bot\]$/i.test(a)) continue; // automation accounts are not people who know the code
-      counts.set(a, (counts.get(a) ?? 0) + 1);
-      totals.set(a, (totals.get(a) ?? 0) + 1);
-      total++;
+      if (line.startsWith('\t')) {
+        // End of one line's record. Lines from the cut-off commit of a shallow clone have no real author,
+        // and automation accounts are not people who know the code.
+        if (author && !skip.has(hash) && !/\[bot\]$/i.test(author)) {
+          counts.set(author, (counts.get(author) ?? 0) + 1);
+          totals.set(author, (totals.get(author) ?? 0) + 1);
+          total++;
+        }
+        hash = '';
+        author = '';
+      } else if (!hash) {
+        hash = line.split(' ')[0];
+      } else if (line.startsWith('author ')) {
+        author = line.slice(7);
+      }
     }
     byFile.set(file, counts);
-  }
+  };
+  // A few at a time: fast on large changes without starting hundreds of git processes.
+  const queue = [...files];
+  await Promise.all(Array.from({ length: Math.min(8, queue.length) }, async () => {
+    for (let f = queue.shift(); f !== undefined; f = queue.shift()) await one(f);
+  }));
   return { byFile, totals, total };
 }
 
@@ -380,12 +403,13 @@ export function diffToMarkdown(r: DiffReport): string {
     out.push('');
     out.push(`| File | Lines | Complexity | Imported by | Knows it best |`);
     out.push(`| --- | --- | --- | --- | --- |`);
-    for (const f of r.files) {
+    for (const f of r.files.slice(0, 100)) {
       const cx =
         f.complexityBefore === null ? `new, ${f.complexityAfter}` : f.complexityAfter === null ? 'deleted' : `${f.complexityBefore} → ${f.complexityAfter}`;
-      const who = f.topAuthor ? `${f.topAuthor}${f.onlyAuthor ? ' (only author)' : ''}` : 'new file';
+      const who = f.topAuthor ? `${f.topAuthor}${f.onlyAuthor ? ' (only author)' : ''}` : f.status === 'added' ? 'new file' : 'not known';
       out.push(`| \`${f.path}\`${f.role === 'test' ? ' (test)' : ''} | +${f.added} -${f.removed} | ${cx} | ${f.directDependents} | ${who} |`);
     }
+    if (r.files.length > 100) out.push(`\nAnd ${r.files.length - 100} more. Run \`tsight diff\` locally for the full list.`);
     out.push('');
     out.push(`</details>`);
     out.push('');
@@ -402,7 +426,7 @@ export function diffToMarkdown(r: DiffReport): string {
     out.push('');
   }
   if (r.owners.length > 0) {
-    out.push(`**Who wrote the lines being changed:** ` + r.owners.map((o) => `${o.author} ${o.percent}%`).join(', '));
+    out.push(`**Who wrote the lines being changed:** ` + r.owners.slice(0, 5).map((o) => `${o.author} ${o.percent}%`).join(', ') + (r.owners.length > 5 ? `, and ${r.owners.length - 5} more` : ''));
     out.push('');
   }
   if (r.shallowHistory) {

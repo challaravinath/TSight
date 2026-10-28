@@ -60,7 +60,9 @@ describe('diff', () => {
     ]);
     expect(report.complexity.net).toBe(5);
     expect(report.newCycles.map((c) => c.files)).toEqual([['src/payment.ts', 'src/retry.ts']]);
-    expect(report.blastRadius).toEqual({ files: 2, percent: 40, entryPoints: ['src/ui.ts'] });
+    expect(report.blastRadius).toEqual({ files: 2, percent: 40, entryPoints: ['src/ui.ts'], reached: ['src/cart.ts', 'src/ui.ts'] });
+    // The function list adds up to the net change, so the number and its list agree.
+    expect(report.complexity.functions.reduce((s, f) => s + (f.after ?? 0) - (f.before ?? 0), 0)).toBe(report.complexity.net);
     // History before the change only: the commit under review is not counted.
     expect(report.partners).toEqual([{ file: 'src/orders.ts', partnerOf: 'src/payment.ts', together: 7, commitsOfChanged: 7, hidden: true }]);
     // Bob's edits were all overwritten before the merge base, so git blame credits Alice alone.

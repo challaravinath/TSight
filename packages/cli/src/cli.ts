@@ -95,7 +95,8 @@ function buildReport(snapshot: Snapshot, diff: DiffReport | null): string {
     return `<style>${css}</style>`;
   });
   const data = `<script>window.__TSIGHT_SNAPSHOT__=${safe(snapshot)};window.__TSIGHT_DIFF__=${safe(diff)};</script>`;
-  return html.replace('</head>', `${data}\n</head>`);
+  // A function, so that $ sequences in the data are not read as replacement patterns.
+  return html.replace('</head>', () => `${data}\n</head>`);
 }
 
 async function main() {

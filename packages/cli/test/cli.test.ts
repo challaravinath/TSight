@@ -51,6 +51,24 @@ describe.skipIf(!built)('tsight command', () => {
     expect(html).not.toMatch(/(src|href)=["']https?:/); // nothing loads from the network
   });
 
+  it('report keeps $ sequences in the data as they are', () => {
+    const dir = project({ 'src/a.ts': "export function $$store() {}\nexport const $after = \"$'\";\n" });
+    git(dir, 'init', '-q', '-b', 'main');
+    git(dir, 'add', '.');
+    execFileSync('git', ['commit', '-q', '-m', 'start'], {
+      cwd: dir,
+      env: { ...process.env, GIT_AUTHOR_NAME: "Bob $`x", GIT_AUTHOR_EMAIL: 'b@example.com', GIT_COMMITTER_NAME: 'Bob', GIT_COMMITTER_EMAIL: 'b@example.com' },
+    });
+    const out = path.join(dir, 'report.html');
+    expect(run(dir, 'report', '.', '--out', out).status).toBe(0);
+    const html = fs.readFileSync(out, 'utf8');
+    const data = html.slice(html.indexOf('window.__TSIGHT_SNAPSHOT__='), html.indexOf('</script>', html.indexOf('window.__TSIGHT_SNAPSHOT__=')));
+    const snap = JSON.parse(data.slice('window.__TSIGHT_SNAPSHOT__='.length, data.indexOf(';window.__TSIGHT_DIFF__')));
+    expect(snap.files[0].exports).toEqual(['$$store', '$after']);
+    expect(Object.keys(snap.git.authorLastActive)).toEqual(['Bob $`x']);
+    expect(data).toContain(';window.__TSIGHT_DIFF__=null;');
+  });
+
   it('diff exits with 1 when --fail-on new-cycle matches', () => {
     const dir = project({ 'src/a.ts': "import { b } from './b';\nexport const a = () => b;\n", 'src/b.ts': 'export const b = 1;\n' });
     git(dir, 'init', '-q', '-b', 'main');

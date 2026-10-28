@@ -18,6 +18,8 @@
  * - Only files that exist in the analysis are reported.
  */
 import { execFile } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface GitCommit {
   hash: string;
@@ -82,7 +84,25 @@ export async function readGitHistory(root: string): Promise<GitHistory> {
     '.',
   ]);
 
-  return { available: true, head, shallow, renamesFollowed, commits: parseLog(raw) };
+  let commits = parseLog(raw);
+  if (shallow) {
+    // The oldest commit of a shallow clone has no parent here, so git lists every file in it as
+    // added. That would credit its author with the whole codebase, so those commits are left out.
+    const boundary = await shallowBoundary(root);
+    commits = commits.filter((c) => !boundary.has(c.hash));
+  }
+  return { available: true, head, shallow, renamesFollowed, commits };
+}
+
+/** Commits at the cut-off of a shallow clone, from .git/shallow. */
+export async function shallowBoundary(root: string): Promise<Set<string>> {
+  try {
+    const file = (await git(root, ['rev-parse', '--git-path', 'shallow'])).trim();
+    const text = fs.readFileSync(path.resolve(root, file), 'utf8');
+    return new Set(text.split(/\s+/).filter(Boolean));
+  } catch {
+    return new Set();
+  }
 }
 
 /** Parse the output of the log command above. Exported for tests. */

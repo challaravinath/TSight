@@ -2,7 +2,7 @@
  * Evidence builders. Each returns the exact list a number on screen was counted from.
  */
 import type { Evidence, EvidenceItem } from './evidence';
-import { blastLevels, fmt, plural, type Model } from './model';
+import { blastLevels, fmt, plural, type Model, type Snapshot } from './model';
 import { to } from './router';
 
 const p = (m: Model, i: number) => m.files[i].path;
@@ -25,11 +25,27 @@ export const fileItem = (m: Model, i: number, extra: Partial<EvidenceItem> = {})
   ...extra,
 });
 
+/** One row per file, with every import statement it makes listed under it. */
+function byFile(m: Model, ks: number[], side: 'from' | 'to'): Array<{ file: number; imps: Snapshot['imports'] }> {
+  const groups = new Map<number, Snapshot['imports']>();
+  for (const k of ks) {
+    const imp = m.s.imports[k];
+    if (imp.from === imp.to) continue;
+    const f = imp[side];
+    const g = groups.get(f) ?? [];
+    g.push(imp);
+    groups.set(f, g);
+  }
+  return [...groups]
+    .map(([file, imps]) => ({ file, imps: imps.sort((a, b) => a.line - b.line) }))
+    .sort((a, b) => p(m, a.file).localeCompare(p(m, b.file)));
+}
+
+const linesOf = (imps: Snapshot['imports']) =>
+  imps.length === 1 ? `line ${imps[0].line}` : `lines ${imps.map((x) => x.line).join(', ')}`;
+
 export function importersOf(m: Model, i: number): Evidence {
-  const rows = m.importsTo[i]
-    .map((k) => m.s.imports[k])
-    .filter((imp) => imp.from !== i)
-    .sort((a, b) => p(m, a.from).localeCompare(p(m, b.from)) || a.line - b.line);
+  const rows = byFile(m, m.importsTo[i], 'from');
   const tests = [...m.importers[i]].filter((f) => m.files[f].role === 'test').length;
   return {
     kind: 'Dependents',
@@ -38,33 +54,34 @@ export function importersOf(m: Model, i: number): Evidence {
       <>
         <span>
           {plural(m.importers[i].size, 'file')} import this file directly
-          {tests ? `, ${plural(tests, 'test file')} among them` : ''}. Each import statement is listed with its line.
+          {tests ? `, ${plural(tests, 'test file')} among them` : ''}. Each one is listed with the lines of its import statements.
         </span>
       </>
     ),
-    items: rows.map((imp, k) => ({
-      key: `${k}`,
-      label: `${p(m, imp.from)}:${imp.line}`,
-      href: to.file(p(m, imp.from)),
-      right: m.files[imp.from].role === 'test' ? 'test' : undefined,
-      code: importLine(imp.syntax, imp.specifier, imp.typeOnly),
+    items: rows.map(({ file, imps }) => ({
+      key: `${file}`,
+      label: p(m, file),
+      href: to.file(p(m, file)),
+      right: m.files[file].role === 'test' ? 'test' : undefined,
+      sub: linesOf(imps),
+      code: imps.map((imp) => importLine(imp.syntax, imp.specifier, imp.typeOnly)).join('\n'),
     })),
     empty: 'No file in the project imports this one.',
   };
 }
 
 export function importsOf(m: Model, i: number): Evidence {
-  const rows = m.importsFrom[i].map((k) => m.s.imports[k]).sort((a, b) => a.line - b.line);
+  const rows = byFile(m, m.importsFrom[i], 'to');
   return {
     kind: 'Imports',
     title: `Project files imported by ${p(m, i)}`,
     definition: <span>Imports that resolve to another file in this project. Packages from npm are not included.</span>,
-    items: rows.map((imp, k) => ({
-      key: `${k}`,
-      label: p(m, imp.to),
-      href: to.file(p(m, imp.to)),
-      right: `line ${imp.line}`,
-      code: importLine(imp.syntax, imp.specifier, imp.typeOnly),
+    items: rows.map(({ file, imps }) => ({
+      key: `${file}`,
+      label: p(m, file),
+      href: to.file(p(m, file)),
+      right: linesOf(imps),
+      code: imps.map((imp) => importLine(imp.syntax, imp.specifier, imp.typeOnly)).join('\n'),
     })),
     empty: 'This file imports nothing from the project.',
   };
@@ -118,7 +135,7 @@ export function hotspots(m: Model): Evidence {
     definition: (
       <span>
         Score = commits in the 90 days before the analysis × the highest complexity of any function in the file. Bot commits are not
-        counted. The top {hs.length} are listed.
+        counted. Every source file with a commit in that time is listed, highest score first.
       </span>
     ),
     items: hs.map((h) =>

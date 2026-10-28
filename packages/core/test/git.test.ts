@@ -104,3 +104,23 @@ describe('automation accounts', () => {
     expect(coChanges(r, h.commits, { minTogether: 2 })).toEqual([]);
   });
 });
+
+describe('shallow clones', () => {
+  it('leaves out the cut-off commit, which git shows as adding every file', async () => {
+    const src = makeProject({ 'src/a.ts': 'export const a = 1;\n', 'src/b.ts': 'export const b = 1;\n' });
+    gitIn(src, ['init', '-q', '-b', 'main']);
+    gitIn(src, ['add', '.']);
+    gitIn(src, ['commit', '-q', '-m', 'start'], 'Alice');
+    writeFile(src, 'src/a.ts', 'export const a = 2;\n');
+    gitIn(src, ['commit', '-qam', 'two'], 'Bob');
+    writeFile(src, 'src/a.ts', 'export const a = 3;\n');
+    gitIn(src, ['commit', '-qam', 'three'], 'Carol');
+    const clone = makeProject({});
+    gitIn(clone, ['clone', '-q', '--depth', '2', `file://${src.replace(/\\/g, '/')}`, 'c']);
+    const history = await readGitHistory(path.join(clone, 'c'));
+    expect(history.available && history.shallow).toBe(true);
+    if (!history.available) return;
+    // Bob's commit is the cut-off: in the clone it seems to add both files. Only Carol's commit is real.
+    expect(history.commits.map((c) => [c.author, c.files])).toEqual([['Carol', ['src/a.ts']]]);
+  });
+});

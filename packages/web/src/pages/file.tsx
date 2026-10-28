@@ -22,7 +22,7 @@ export function File({ m, path }: { m: Model; path: string }) {
   const reach = blastLevels(m, i).reduce((a, l) => a + l.length, 0);
   const fns = [...m.fns[i]].sort((a, b) => b.complexity - a.complexity || a.line - b.line);
   const importers = [...m.importers[i]].sort((a, b) => m.files[a].path.localeCompare(m.files[b].path));
-  const imports = [...new Set(m.importsFrom[i].map((k) => m.s.imports[k].to))].sort((a, b) => m.files[a].path.localeCompare(m.files[b].path));
+  const imports = [...new Set(m.importsFrom[i].map((k) => m.s.imports[k].to))].filter((t) => t !== i).sort((a, b) => m.files[a].path.localeCompare(m.files[b].path));
   const ext = [...new Set(m.s.externalImports.filter((e) => e.from === i).map((e) => e.package))].sort();
   const partners = (m.s.git?.coChanges ?? []).filter((c) => c.a === i || c.b === i);
   const copies = P.copies(m, path).items.length;
@@ -56,7 +56,7 @@ export function File({ m, path }: { m: Model; path: string }) {
         <Fact label="Reach" value={<Proof of={() => P.blastOf(m, i)}>{fmt(reach)}</Proof>} />
         <Fact label="Highest complexity" value={<Proof of={() => P.functionsOf(m, i)}>{fmt(f.maxComplexity)}</Proof>} />
         {m.s.git && <Fact label="Commits, 90 days" value={fmt(g?.commits90 ?? 0)} />}
-        {m.s.git && <Fact label="Hotspot score" value={hs ? <Proof of={() => P.hotspots(m)}>{fmt(hs.score)}</Proof> : '0'} />}
+        {m.s.git && <Fact label="Hotspot score" value={hs && hs.score > 0 ? <Proof of={() => P.hotspots(m)}>{fmt(hs.score)}</Proof> : '0'} />}
       </section>
 
       <div className="row">

@@ -40,7 +40,7 @@ A table of every source file. Turn on "Include test files" to see tests too. Cli
 ## File page
 
 - The header says if the file is an entry point, part of an import loop, only used by tests, or only ever changed by one person.
-- Lines, dependents, reach, highest complexity, commits in the last 90 days and the hotspot score. Click any of them for the list.
+- Lines, dependents, reach, highest complexity, commits in the last 90 days and the hotspot score. Dependents, reach, complexity and a hotspot score above zero open their lists.
 - Functions, most complex first. Callbacks written inline count toward the function they sit in. A callback at the top level of the file is listed as, for example, "app.get callback".
 - History: everyone who changed the file and how many commits each made. People with no commits in the 6 months before the analysis are marked.
 - Imported by, imports, and files that usually change together with this one.
@@ -75,8 +75,8 @@ Commits from authors whose name ends in `[bot]` are left out everywhere on this 
 
 Type a branch, tag or commit and press Compare. TSight finds where your work split off from it (the merge base), analyzes the code as it was there, analyzes your working copy, and compares the two.
 
-- Reach: how many other files import the changed files, directly or through other files, and how many entry points are among them.
-- Who knows this code: from `git blame` at the merge base, the people who wrote the lines your change touches.
+- Reach: how many other files import the changed files, directly or through other files, and how many entry points are among them. Click either number for the files.
+- Who knows this code: from `git blame` at the merge base, the people who wrote the lines your change touches. In a shallow clone, lines from the oldest commit present are left out, because that commit is not who really wrote them.
 - Complexity: the net change in function complexity across the changed files.
 - New or larger dependency cycles: loops that exist after the change but not before, or got bigger.
 - Changed files with their line counts, complexity before and after, and who wrote most of them.

@@ -200,11 +200,14 @@ export function createServer(options: ServerOptions) {
     if (!projectPath) return res.status(404).json({ success: false, error: 'No analysis yet' });
     const base = typeof req.query.base === 'string' && /^[\w./~^@{}][\w./~^@{}-]{0,199}$/.test(req.query.base) ? req.query.base : null;
     if (!base) return res.status(400).json({ success: false, error: 'base must be a branch, tag or commit, for example main' });
+    // Only a comparison that is still running is shared. The working copy can change at any time,
+    // so a finished result is never reused.
     let pending = diffCache.get(base);
     if (!pending) {
       pending = runJob({ type: 'diff', path: projectPath, base }, () => {});
       diffCache.set(base, pending);
-      pending.catch(() => diffCache.delete(base));
+      const done = pending;
+      done.finally(() => { if (diffCache.get(base) === done) diffCache.delete(base); }).catch(() => {});
     }
     try {
       res.type('application/json').send(await pending);

@@ -269,6 +269,7 @@ function Search({ m }: { m: Model }) {
         role="combobox"
         aria-expanded={open && results.length > 0}
         aria-controls="search-results"
+        aria-activedescendant={open && results[sel] !== undefined ? `search-option-${sel}` : undefined}
         onChange={(e) => { setQ(e.target.value); setSel(0); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
@@ -284,7 +285,7 @@ function Search({ m }: { m: Model }) {
         <div className="search-results" id="search-results" role="listbox">
           {results.length === 0 && <p className="empty" style={{ padding: '8px 10px', margin: 0 }}>No file matches.</p>}
           {results.map((i, k) => (
-            <button key={i} role="option" aria-selected={k === sel} onMouseDown={(e) => e.preventDefault()} onClick={() => go(i)}>
+            <button key={i} id={`search-option-${k}`} role="option" aria-selected={k === sel} onMouseDown={(e) => e.preventDefault()} onClick={() => go(i)}>
               <span className="mono" style={{ display: 'block', overflowWrap: 'anywhere' }}>{m.files[i].path}</span>
               <span className="note">
                 {plural(m.files[i].lines, 'line')}, {plural(m.importers[i].size, 'dependent')}

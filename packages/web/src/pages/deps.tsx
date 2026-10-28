@@ -30,11 +30,13 @@ export function Dependencies({ m }: { m: Model }) {
   const packageProof = (p: (typeof packages)[number]): Evidence => ({
     kind: 'Package',
     title: `Files that import ${p.name}`,
-    definition: <span>Every import of this package, with its line.</span>,
-    items: p.uses
-      .slice()
-      .sort((a, b) => m.files[a.from].path.localeCompare(m.files[b.from].path) || a.line - b.line)
-      .map((u, k) => ({ key: `${k}`, label: `${m.files[u.from].path}:${u.line}`, href: to.file(m.files[u.from].path) })),
+    definition: <span>Every file that imports this package, with the lines of its import statements.</span>,
+    items: [...new Set(p.uses.map((u) => u.from))]
+      .sort((a, b) => m.files[a].path.localeCompare(m.files[b].path))
+      .map((f) => {
+        const lines = p.uses.filter((u) => u.from === f).map((u) => u.line).sort((a, b) => a - b);
+        return { key: `${f}`, label: m.files[f].path, href: to.file(m.files[f].path), sub: `${lines.length === 1 ? 'line' : 'lines'} ${lines.join(', ')}` };
+      }),
   });
 
   return (

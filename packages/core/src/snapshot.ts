@@ -212,7 +212,6 @@ export function buildSnapshot(
         lastChanged: e.last,
       })),
       changeHotspots: changeHotspots(result, history.commits, 90, now)
-        .slice(0, 50)
         .map((h) => ({ ...h, file: idx(h.file) })),
       coChanges: coChanges(result, history.commits)
         .slice(0, 200)

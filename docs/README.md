@@ -85,7 +85,7 @@ The report is a single file with the UI and the data inside it. It opens offline
 }
 ```
 
-**Git history.** Read from the local `.git` folder in one pass, with no token or network access. Names go through `.mailmap`, files keep their history through renames, and merge commits are skipped. Commits from bots (authors ending in `[bot]`) don't count toward people or change pairs. In a shallow clone TSight says so, because authorship and co-change counts only cover the history that is there.
+**Git history.** Read from the local `.git` folder in one pass, with no token or network access. Names go through `.mailmap`, files keep their history through renames, and merge commits are skipped. Commits from bots (authors ending in `[bot]`) don't count toward people or change pairs. In a shallow clone TSight says so, because authorship and co-change counts only cover the history that is there. The oldest commit of a shallow clone is left out, since git shows it as adding every file at once.
 
 **Which files are analyzed.** In a git repository, the files git tracks plus new files that aren't ignored. Outside git, every file except those in `.gitignore` and folders like `dist` and `node_modules`. Declaration files (`.d.ts`) are skipped.
 
@@ -111,7 +111,7 @@ jobs:
           fail-on: new-cycle   # optional
 ```
 
-`fetch-depth: 0` matters. Without the history, TSight can't tell who wrote what. The same report is also written to the job summary, so it shows up for pull requests from forks too, where the comment can't be posted.
+TSight needs the history back to where the branch split off, and the authors of the lines being changed. If the checkout is shallow, the action fetches the full history itself, which takes a little longer; `fetch-depth: 0` saves that step. The same report is also written to the job summary, so it shows up for pull requests from forks too, where the comment can't be posted.
 
 ## What it doesn't do
 
@@ -139,7 +139,7 @@ npm run build
 npm test
 ```
 
-During development, `npm run dev` starts the API on port 3001 and the UI with hot reload on port 3000.
+During development, `npm run dev` starts the API on port 3001 and the UI with hot reload on port 3000. Both rebuild when you save.
 
 To check the numbers against three real repositories pinned to exact commits, run `TSIGHT_CORPUS=1 npm test`. It clones about 150 MB the first time, so it isn't part of the normal run.
 

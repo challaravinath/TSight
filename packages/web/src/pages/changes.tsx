@@ -82,6 +82,12 @@ function Report({ m, d }: { m: Model; d: DiffReport }) {
     definition: <span>Files started by something other than an import (package.json, scripts, framework conventions) that depend on a changed file.</span>,
     items: d.blastRadius.entryPoints.map((f) => ({ key: f, label: f, href: m.byPath.has(f) ? to.file(f) : undefined })),
   });
+  const reachProof = (): Evidence => ({
+    kind: 'Reach',
+    title: 'Files that depend on what changed',
+    definition: <span>Files outside this change that import a changed file, directly or through other files, after the change.</span>,
+    items: (d.blastRadius.reached ?? []).map((f) => ({ key: f, label: f, href: m.byPath.has(f) ? to.file(f) : undefined })),
+  });
   const ownerProof = (): Evidence => ({
     kind: 'Owners',
     title: 'Who wrote the lines this change touches',
@@ -116,7 +122,8 @@ function Report({ m, d }: { m: Model; d: DiffReport }) {
         <div className="panel answer risk">
           <h2>Reach</h2>
           <div className="big">
-            {fmt(d.blastRadius.files)} <small>other files depend on what changed</small>
+            {d.blastRadius.reached ? <Proof of={reachProof}>{fmt(d.blastRadius.files)}</Proof> : fmt(d.blastRadius.files)}{' '}
+            <small>other files depend on what changed</small>
           </div>
           <div className="formula">
             <span>{d.blastRadius.percent}% of the project, including <Proof of={entryProof}>{plural(d.blastRadius.entryPoints.length, 'entry point')}</Proof></span>
@@ -183,7 +190,7 @@ function Report({ m, d }: { m: Model; d: DiffReport }) {
                   </td>
                   <td className="num">{fmt(f.directDependents)}</td>
                   <td>
-                    {f.topAuthor ?? <span className="muted">new file</span>}
+                    {f.topAuthor ?? <span className="muted">{f.status === 'added' ? 'new file' : 'not known'}</span>}
                     {f.onlyAuthor && <span className="chip" style={{ marginLeft: 8, color: 'var(--people)' }}>only author</span>}
                   </td>
                 </tr>

@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc --watch",
+    "dev": "tsc && concurrently -k \"tsc --watch --preserveWatchOutput\" \"node --watch dist/index.js\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
