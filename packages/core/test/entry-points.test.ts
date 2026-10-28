@@ -90,7 +90,8 @@ describe('import.meta.glob', () => {
 });
 
 describe('numbers that must agree', () => {
-  it('never rounds the resolution rate up to 100%', async () => {
+  // 4,001 files: slow to write and parse on Windows runners.
+  it('never rounds the resolution rate up to 100%', { timeout: 180_000 }, async () => {
     const files: Record<string, string> = { 'missing.ts': "import x from './nope';\nexport default x;\n" };
     for (let i = 0; i < 2000; i++) files[`f${i}.ts`] = `import y from './g${i}';\nexport default y;\n`;
     for (let i = 0; i < 2000; i++) files[`g${i}.ts`] = 'export default 1;\n';

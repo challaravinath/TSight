@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as path from 'path';
+import { pathToFileURL } from 'url';
 import { readGitHistory, ownership, busFactor, churn, analyzeProject, type GitCommit } from '../src/index.js';
 import { makeProject, gitIn, writeFile } from './helpers.js';
 
@@ -116,7 +117,7 @@ describe('shallow clones', () => {
     writeFile(src, 'src/a.ts', 'export const a = 3;\n');
     gitIn(src, ['commit', '-qam', 'three'], 'Carol');
     const clone = makeProject({});
-    gitIn(clone, ['clone', '-q', '--depth', '2', `file://${src.replace(/\\/g, '/')}`, 'c']);
+    gitIn(clone, ['clone', '-q', '--depth', '2', pathToFileURL(src).href, 'c']);
     const history = await readGitHistory(path.join(clone, 'c'));
     expect(history.available && history.shallow).toBe(true);
     if (!history.available) return;
