@@ -2,11 +2,6 @@
 
 All notable changes to TSight. Versions follow [semantic versioning](https://semver.org): a change to the snapshot format or the command line options that breaks existing use goes in a new major version.
 
-## Unreleased
-
-### Changed
-- TSight is no longer published to npm. Run it from a clone of this repository; the README has the steps.
-
 ## 3.0.2 (2026-10-28)
 
 ### Changed
@@ -14,10 +9,6 @@ All notable changes to TSight. Versions follow [semantic versioning](https://sem
 - The packages depend on each other at `^3.0.2`.
 
 ## 3.0.1 (2026-10-28)
-
-### New
-- TSight is on npm. Run `npx tsight` in any project folder, with no clone or build.
-- The engine and server are published too, as `@tsight/core` and `@tsight/api`, for building your own reports and checks.
 
 ### Fixed
 - The `tsight` command no longer reads the analyzed project's `.env` file. Only the standalone server does.
