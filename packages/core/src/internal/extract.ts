@@ -1,30 +1,36 @@
-import { SourceFile, Node } from 'ts-morph';
+import { SourceFile, Node, SyntaxKind, ts } from 'ts-morph';
 import * as path from 'path';
-import * as fs from 'fs';
-import {
+import type {
   FileInfo,
   FolderInfo,
   ClassInfo,
-  FunctionInfo,
   InterfaceInfo,
   ImportInfo,
+  ImportSyntax,
+  ParameterInfo,
+  FileRole,
 } from '../types.js';
-import { toRelative } from './paths.js';
-import { extractParameter, getVisibility } from './syntax-helpers.js';
-import { calculateFunctionComplexity } from './complexity.js';
+import { ModuleResolver } from './resolve.js';
+import { toPosix } from './discovery.js';
 
-export function extractFiles(rootPath: string, sourceFiles: SourceFile[]): FileInfo[] {
-  return sourceFiles.map((sf) => {
-    const filePath = sf.getFilePath();
-    const relativePath = toRelative(rootPath, filePath);
+export interface Parsed {
+  sf: SourceFile;
+  rel: string;
+  role: FileRole;
+}
 
+export function extractFiles(parsed: Parsed[]): FileInfo[] {
+  return parsed.map(({ sf, rel, role }) => {
+    const text = sf.getFullText();
+    const folder = path.posix.dirname(rel);
     return {
-      path: relativePath,
-      name: path.basename(filePath),
-      extension: path.extname(filePath),
-      folder: path.dirname(relativePath),
-      lines: sf.getEndLineNumber(),
-      size: sf.getFullText().length,
+      path: rel,
+      name: path.posix.basename(rel),
+      extension: path.posix.extname(rel),
+      folder: folder === '.' ? '' : folder,
+      lines: text.length === 0 ? 0 : text.split(/\r\n|\r|\n/).length,
+      size: text.length,
+      role,
     };
   });
 }
@@ -41,20 +47,11 @@ export function extractFolders(files: FileInfo[]): FolderInfo[] {
       currentPath = currentPath ? `${currentPath}/${part}` : part;
 
       if (!folderMap.has(currentPath)) {
-        folderMap.set(currentPath, {
-          path: currentPath,
-          name: part,
-          fileCount: 0,
-          totalLines: 0,
-          children: [],
-        });
+        folderMap.set(currentPath, { path: currentPath, name: part, fileCount: 0, totalLines: 0, children: [] });
       }
-
-      if (parentPath && folderMap.has(parentPath)) {
+      if (parentPath) {
         const parent = folderMap.get(parentPath)!;
-        if (!parent.children.includes(part)) {
-          parent.children.push(part);
-        }
+        if (!parent.children.includes(part)) parent.children.push(part);
       }
     }
 
@@ -68,38 +65,56 @@ export function extractFolders(files: FileInfo[]): FolderInfo[] {
   return Array.from(folderMap.values());
 }
 
-export function extractClasses(rootPath: string, sourceFiles: SourceFile[]): ClassInfo[] {
+function annotation(node: Node, typeNode: Node | undefined): string {
+  return typeNode ? typeNode.getText() : 'inferred';
+}
+
+function parameters(params: Node[]): ParameterInfo[] {
+  return params.map((p) => {
+    const param = p.asKindOrThrow(SyntaxKind.Parameter);
+    return {
+      name: param.getName(),
+      type: annotation(param, param.getTypeNode()),
+      optional: param.hasQuestionToken() || param.hasInitializer(),
+      defaultValue: param.getInitializer()?.getText(),
+    };
+  });
+}
+
+function visibility(node: { hasModifier(kind: SyntaxKind): boolean }): 'public' | 'private' | 'protected' {
+  if (node.hasModifier(SyntaxKind.PrivateKeyword)) return 'private';
+  if (node.hasModifier(SyntaxKind.ProtectedKeyword)) return 'protected';
+  return 'public';
+}
+
+export function extractClasses(parsed: Parsed[]): ClassInfo[] {
   const classes: ClassInfo[] = [];
-
-  for (const sf of sourceFiles) {
-    const relativePath = toRelative(rootPath, sf.getFilePath());
-
+  for (const { sf, rel } of parsed) {
     for (const cls of sf.getClasses()) {
-      const name = cls.getName();
+      const name = cls.getName() ?? (cls.isDefaultExport() ? 'default' : undefined);
       if (!name) continue;
-
       classes.push({
-        id: `${relativePath}:${name}`,
+        id: `${rel}:${name}`,
         name,
         type: 'class',
-        file: relativePath,
+        file: rel,
         line: cls.getStartLineNumber(),
         endLine: cls.getEndLineNumber(),
         exported: cls.isExported(),
         methods: cls.getMethods().map((m) => ({
           name: m.getName(),
-          parameters: m.getParameters().map((p) => extractParameter(p)),
-          returnType: m.getReturnType().getText(),
-          visibility: getVisibility(m),
+          parameters: parameters(m.getParameters()),
+          returnType: annotation(m, m.getReturnTypeNode()),
+          visibility: visibility(m),
           async: m.isAsync(),
           static: m.isStatic(),
           line: m.getStartLineNumber(),
         })),
         properties: cls.getProperties().map((p) => ({
           name: p.getName(),
-          type: p.getType().getText(),
+          type: annotation(p, p.getTypeNode()),
           optional: p.hasQuestionToken(),
-          visibility: getVisibility(p),
+          visibility: visibility(p),
         })),
         extends: cls.getExtends()?.getText(),
         implements: cls.getImplements().map((i) => i.getText()),
@@ -107,139 +122,181 @@ export function extractClasses(rootPath: string, sourceFiles: SourceFile[]): Cla
       });
     }
   }
-
   return classes;
 }
 
-export function extractFunctions(
-  rootPath: string,
-  sourceFiles: SourceFile[],
-): FunctionInfo[] {
-  const functions: FunctionInfo[] = [];
-
-  for (const sf of sourceFiles) {
-    const relativePath = toRelative(rootPath, sf.getFilePath());
-
-    // Top-level functions
-    for (const func of sf.getFunctions()) {
-      const name = func.getName();
-      if (!name) continue;
-
-      functions.push(createFunctionInfo(func, name, relativePath));
-    }
-
-    // Arrow functions assigned to variables (React components)
-    for (const varDecl of sf.getVariableDeclarations()) {
-      const init = varDecl.getInitializer();
-      if (init && (Node.isArrowFunction(init) || Node.isFunctionExpression(init))) {
-        const name = varDecl.getName();
-        functions.push(createFunctionInfo(init, name, relativePath, varDecl.isExported()));
-      }
-    }
-  }
-
-  return functions;
-}
-
-function createFunctionInfo(
-  func: any,
-  name: string,
-  file: string,
-  exported?: boolean,
-): FunctionInfo {
-  const body = func.getBody?.();
-  const lines = body
-    ? (body.getEndLineNumber?.() || 0) - (body.getStartLineNumber?.() || 0) + 1
-    : 1;
-
-  return {
-    id: `${file}:${name}`,
-    name,
-    type: 'function',
-    file,
-    line: func.getStartLineNumber?.() || 1,
-    endLine: func.getEndLineNumber?.() || 1,
-    exported: exported ?? func.isExported?.() ?? false,
-    parameters: (func.getParameters?.() || []).map((p: any) => extractParameter(p)),
-    returnType: func.getReturnType?.()?.getText?.() || 'unknown',
-    async: func.isAsync?.() ?? false,
-    complexity: calculateFunctionComplexity(func),
-    lines,
-  };
-}
-
-export function extractInterfaces(
-  rootPath: string,
-  sourceFiles: SourceFile[],
-): InterfaceInfo[] {
+export function extractInterfaces(parsed: Parsed[]): InterfaceInfo[] {
   const interfaces: InterfaceInfo[] = [];
-
-  for (const sf of sourceFiles) {
-    const relativePath = toRelative(rootPath, sf.getFilePath());
-
+  for (const { sf, rel } of parsed) {
     for (const iface of sf.getInterfaces()) {
       const name = iface.getName();
-
       interfaces.push({
-        id: `${relativePath}:${name}`,
+        id: `${rel}:${name}`,
         name,
         type: 'interface',
-        file: relativePath,
+        file: rel,
         line: iface.getStartLineNumber(),
         endLine: iface.getEndLineNumber(),
         exported: iface.isExported(),
         properties: iface.getProperties().map((p) => ({
           name: p.getName(),
-          type: p.getType().getText(),
+          type: annotation(p, p.getTypeNode()),
           optional: p.hasQuestionToken(),
         })),
         extends: iface.getExtends().map((e) => e.getText()),
       });
     }
   }
-
   return interfaces;
 }
 
-export function extractImports(rootPath: string, sourceFiles: SourceFile[]): ImportInfo[] {
-  const imports: ImportInfo[] = [];
-
-  for (const sf of sourceFiles) {
-    const fromPath = toRelative(rootPath, sf.getFilePath());
-
-    for (const imp of sf.getImportDeclarations()) {
-      const moduleSpec = imp.getModuleSpecifierValue();
-      const isExternal = !moduleSpec.startsWith('.') && !moduleSpec.startsWith('/');
-
-      let toPath = moduleSpec;
-      if (!isExternal) {
-        // Resolve relative import
-        const resolved = path.resolve(path.dirname(sf.getFilePath()), moduleSpec);
-        toPath = toRelative(rootPath, resolved);
-        // Try to add extension if missing
-        if (!toPath.match(/\.(ts|tsx|js|jsx)$/)) {
-          for (const ext of ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx']) {
-            if (fs.existsSync(path.join(rootPath, toPath + ext))) {
-              toPath = toPath + ext;
-              break;
-            }
-          }
-        }
+/**
+ * Names a file exports from its own declarations (re-exports are left out,
+ * they belong to the file that declares them), plus the local names of
+ * those declarations so `export default function Foo` marks Foo exported.
+ */
+export function extractExports(parsed: Parsed[]): {
+  exportsByFile: Record<string, string[]>;
+  exportedLocalNames: Map<string, Set<string>>;
+} {
+  const exportsByFile: Record<string, string[]> = {};
+  const exportedLocalNames = new Map<string, Set<string>>();
+  for (const { sf, rel } of parsed) {
+    const names: string[] = [];
+    const locals = new Set<string>();
+    let exported: ReadonlyMap<string, Node[]>;
+    try {
+      exported = sf.getExportedDeclarations();
+    } catch {
+      exported = new Map();
+    }
+    for (const [exportName, decls] of exported) {
+      const own = decls.filter((d) => d.getSourceFile() === sf);
+      if (own.length === 0) continue;
+      names.push(exportName);
+      locals.add(exportName);
+      for (const d of own) {
+        const local = (d as unknown as { getName?: () => string | undefined }).getName?.();
+        if (local) locals.add(local);
       }
+    }
+    exportsByFile[rel] = names.sort();
+    exportedLocalNames.set(rel, locals);
+  }
+  return { exportsByFile, exportedLocalNames };
+}
 
-      const namedImports = imp.getNamedImports().map((n) => n.getName());
-      const defaultImport = imp.getDefaultImport()?.getText();
-      const allImports = defaultImport ? [defaultImport, ...namedImports] : namedImports;
+interface RawImport {
+  specifier: string;
+  syntax: ImportSyntax;
+  typeOnly: boolean;
+  names: string[];
+  line: number;
+}
 
-      imports.push({
-        from: fromPath,
-        to: toPath,
-        imports: allImports,
-        isExternal,
-        line: imp.getStartLineNumber(),
-      });
+function collectRawImports(sf: SourceFile): RawImport[] {
+  const out: RawImport[] = [];
+
+  for (const imp of sf.getImportDeclarations()) {
+    const names: string[] = [];
+    if (imp.getDefaultImport()) names.push('default');
+    if (imp.getNamespaceImport()) names.push('*');
+    for (const n of imp.getNamedImports()) names.push(n.getName());
+    out.push({
+      specifier: imp.getModuleSpecifierValue(),
+      syntax: 'import',
+      typeOnly: imp.isTypeOnly() || (names.length > 0 && imp.getNamedImports().length === names.length && imp.getNamedImports().every((n) => n.isTypeOnly())),
+      names,
+      line: imp.getStartLineNumber(),
+    });
+  }
+
+  for (const exp of sf.getExportDeclarations()) {
+    const spec = exp.getModuleSpecifierValue();
+    if (!spec) continue;
+    const named = exp.getNamedExports().map((n) => n.getName());
+    out.push({
+      specifier: spec,
+      syntax: 'export',
+      typeOnly: exp.isTypeOnly(),
+      names: named.length > 0 ? named : ['*'],
+      line: exp.getStartLineNumber(),
+    });
+  }
+
+  // import x = require('y')
+  for (const ie of sf.getDescendantsOfKind(SyntaxKind.ImportEqualsDeclaration)) {
+    const ref = ie.getModuleReference();
+    if (Node.isExternalModuleReference(ref)) {
+      const expr = ref.getExpression();
+      if (expr && Node.isStringLiteral(expr)) {
+        out.push({ specifier: expr.getLiteralValue(), syntax: 'require', typeOnly: ie.isTypeOnly(), names: ['*'], line: ie.getStartLineNumber() });
+      }
     }
   }
 
+  // import('x') and require('x') with a literal argument. Walk the raw AST: it is much faster.
+  const raw = sf.compilerNode;
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && node.arguments.length >= 1) {
+      const arg = node.arguments[0];
+      const literal = ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg) ? arg.text : null;
+      if (literal !== null) {
+        const isDynamic = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+        const isRequire = ts.isIdentifier(node.expression) && node.expression.text === 'require';
+        if (isDynamic || isRequire) {
+          out.push({
+            specifier: literal,
+            syntax: isDynamic ? 'dynamic' : 'require',
+            typeOnly: false,
+            names: ['*'],
+            line: raw.getLineAndCharacterOfPosition(node.getStart(raw)).line + 1,
+          });
+        }
+      }
+    }
+    // import('x') inside a type position, e.g. typeof import('./a')
+    if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument) && ts.isStringLiteral(node.argument.literal)) {
+      out.push({
+        specifier: node.argument.literal.text,
+        syntax: 'dynamic',
+        typeOnly: true,
+        names: ['*'],
+        line: raw.getLineAndCharacterOfPosition(node.getStart(raw)).line + 1,
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(raw, visit);
+
+  return out;
+}
+
+export function extractImports(root: string, parsed: Parsed[], resolver: ModuleResolver): ImportInfo[] {
+  const imports: ImportInfo[] = [];
+  const rootAbs = path.resolve(root);
+
+  for (const { sf, rel } of parsed) {
+    const fromAbs = path.resolve(sf.getFilePath());
+    for (const raw of collectRawImports(sf)) {
+      const res = resolver.resolve(raw.specifier, fromAbs);
+      const to =
+        res.target && (res.kind === 'internal' || res.kind === 'excluded')
+          ? toPosix(path.relative(rootAbs, res.target))
+          : raw.specifier;
+      imports.push({
+        from: rel,
+        to,
+        specifier: raw.specifier,
+        kind: res.kind,
+        syntax: raw.syntax,
+        typeOnly: raw.typeOnly,
+        imports: raw.names,
+        isExternal: res.kind === 'external',
+        line: raw.line,
+        resolvedBy: res.resolvedBy,
+      });
+    }
+  }
   return imports;
 }

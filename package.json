@@ -1,13 +1,20 @@
 {
   "name": "tsight",
   "version": "1.0.0",
-  "description": "TSight - TypeScript Code Analyzer with Mental Model Visualization",
+  "description": "See how a TypeScript codebase fits together, using only facts from the code and its git history",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "workspaces": [
-    "packages/*"
+    "packages/core",
+    "packages/api",
+    "packages/web"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
+    "build": "npm run build -w @tsight/core && npm run build -w @tsight/api && npm run build -w @tsight/web",
+    "test": "npm run test -w @tsight/core",
+    "typecheck": "npm run typecheck -w @tsight/core && npm run typecheck -w @tsight/api",
     "dev": "concurrently \"npm run dev --workspace=@tsight/api\" \"npm run dev --workspace=@tsight/web\"",
     "start": "npm run start --workspace=@tsight/api"
   },

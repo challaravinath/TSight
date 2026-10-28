@@ -1,13 +1,14 @@
 {
   "name": "@tsight/api",
   "version": "1.0.0",
-  "description": "TSight API Server",
+  "description": "TSight HTTP API: serves analysis results to the web UI",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tsight/core": "*",

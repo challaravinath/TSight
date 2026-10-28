@@ -1,126 +1,100 @@
-import { SourceFile } from 'ts-morph';
-import * as path from 'path';
-import { CodeIssue, FunctionInfo, DependencyGraph } from '../types.js';
-import { toRelative } from './paths.js';
+import type {
+  CodeIssue,
+  FunctionInfo,
+  DependencyGraph,
+  FileInfo,
+  EntryPoint,
+  ResolutionStats,
+} from '../types.js';
+import { reverseEdges } from './graph.js';
 
 /**
- * Conservative dead-code detection: only flag files that are completely
- * unimported anywhere. We accept missing some dead code in exchange for
- * zero false positives.
+ * Source files that no analyzed file imports and that no entry-point rule
+ * covers. Reported as "no importers found", not "unused": a file can still
+ * be loaded in ways TSight does not see (a framework TSight has no rule
+ * for, or an import it could not resolve).
  */
-export function findDeadCode(rootPath: string, sourceFiles: SourceFile[]): CodeIssue[] {
+export function findFilesWithoutImporters(
+  files: FileInfo[],
+  graph: DependencyGraph,
+  entryPoints: EntryPoint[],
+  resolution: ResolutionStats,
+): CodeIssue[] {
+  const importers = reverseEdges(graph);
+  const entries = new Set(entryPoints.map((e) => e.file));
+  const unresolvedNote =
+    resolution.unresolved > 0
+      ? ` ${resolution.unresolved} import${resolution.unresolved === 1 ? '' : 's'} in the project could not be resolved, so check those first.`
+      : '';
+
   const issues: CodeIssue[] = [];
-
-  // Build a map of all files and what imports them
-  const fileImportCount = new Map<string, number>();
-
-  for (const sf of sourceFiles) {
-    for (const imp of sf.getImportDeclarations()) {
-      const moduleSpec = imp.getModuleSpecifierValue();
-      if (moduleSpec.startsWith('.')) {
-        const resolved = path.resolve(path.dirname(sf.getFilePath()), moduleSpec);
-        const relativePath = toRelative(rootPath, resolved);
-
-        // Count imports to this file (try various extensions)
-        const variants = [
-          relativePath,
-          relativePath + '.ts',
-          relativePath + '.tsx',
-          relativePath + '/index.ts',
-          relativePath + '/index.tsx',
-          relativePath.replace(/\.(ts|tsx)$/, ''),
-        ];
-
-        for (const v of variants) {
-          fileImportCount.set(v, (fileImportCount.get(v) || 0) + 1);
-        }
-      }
+  for (const file of files) {
+    if (file.role !== 'source' || entries.has(file.path)) continue;
+    const from = importers.get(file.path);
+    if (from && from.size > 0) {
+      const sourceImporters = Array.from(from).filter((f) => !isTestPath(files, f));
+      if (sourceImporters.length > 0) continue;
+      issues.push({
+        type: 'dead-code',
+        severity: 'info',
+        message: `Only imported by tests (${from.size} test file${from.size === 1 ? '' : 's'})`,
+        file: file.path,
+        line: 1,
+        details: Array.from(from).sort().join(', '),
+        suggestion: 'If it is test support code, move it next to the tests.',
+      });
+      continue;
     }
+    issues.push({
+      type: 'dead-code',
+      severity: 'info',
+      message: 'No importers found',
+      file: file.path,
+      line: 1,
+      details: 'No analyzed file imports it, and it does not match an entry-point rule.' + unresolvedNote,
+      suggestion: 'Confirm nothing loads it (a framework, a script, a dynamic path), then remove it.',
+    });
   }
-
-  for (const sf of sourceFiles) {
-    const relativePath = toRelative(rootPath, sf.getFilePath());
-
-    if (shouldSkipDeadCodeCheck(relativePath)) continue;
-
-    const isImported =
-      fileImportCount.has(relativePath) ||
-      fileImportCount.has(relativePath.replace(/\.(ts|tsx)$/, ''));
-
-    if (!isImported) {
-      const exports = sf.getExportedDeclarations();
-      if (exports.size > 0) {
-        const firstName = Array.from(exports.keys())[0];
-
-        issues.push({
-          type: 'dead-code',
-          severity: 'info',
-          message: `File appears unused (exports "${firstName}" and ${exports.size - 1} more)`,
-          file: relativePath,
-          line: 1,
-          suggestion: 'Verify this file is needed or remove it',
-        });
-      }
-    }
-  }
-
   return issues;
 }
 
-function shouldSkipDeadCodeCheck(filePath: string): boolean {
-  const lower = filePath.toLowerCase();
-
-  if (lower.includes('.test.') || lower.includes('.spec.')) return true;
-  if (lower.endsWith('.d.ts')) return true;
-  if (lower.endsWith('index.ts') || lower.endsWith('index.tsx')) return true;
-  if (lower.includes('generated') || lower.includes('.generated.')) return true;
-  if (lower.includes('/gen/') || lower.includes('\\gen\\')) return true;
-  if (lower.includes('config')) return true;
-  if (lower.includes('webpack')) return true;
-  if (lower.includes('jest')) return true;
-  if (lower.includes('babel')) return true;
-  if (lower.includes('/entities/')) return true;
-  if (lower.includes('/models/')) return true;
-  if (lower.includes('/types/')) return true;
-  if (lower.includes('enum')) return true;
-  if (lower.includes('constants')) return true;
-  if (lower.includes('strings')) return true;
-  if (lower.includes('localization')) return true;
-  if (lower.includes('i18n')) return true;
-  if (lower.includes('app.ts') || lower.includes('main.ts')) return true;
-  if (lower.includes('/testing/')) return true;
-  if (lower.includes('/test/')) return true;
-  if (lower.includes('/tests/')) return true;
-  if (lower.includes('/__tests__/')) return true;
-  if (lower.includes('/mock/')) return true;
-  if (lower.includes('/mocks/')) return true;
-  if (lower.includes('/__mocks__/')) return true;
-  if (lower.includes('.mock.')) return true;
-  if (lower.includes('.stub.')) return true;
-
-  return false;
+const testPathCache = new WeakMap<FileInfo[], Set<string>>();
+function isTestPath(files: FileInfo[], p: string): boolean {
+  let set = testPathCache.get(files);
+  if (!set) {
+    set = new Set(files.filter((f) => f.role === 'test').map((f) => f.path));
+    testPathCache.set(files, set);
+  }
+  return set.has(p);
 }
 
 export function findCircularDependencies(graph: DependencyGraph): CodeIssue[] {
-  return graph.circular.map((cycle) => ({
-    type: 'circular-dep' as const,
-    severity: 'error' as const,
-    message: `Circular dependency: ${cycle.join(' → ')} → ${cycle[0]}`,
-    file: cycle[0],
-    details: cycle.join(' → '),
-    suggestion: 'Break the cycle by extracting shared code or restructuring',
-  }));
+  return graph.cycleGroups.map((group) => {
+    const cycle = group.example;
+    const more = group.files.length > cycle.length ? ` (${group.files.length} files are in this cycle group)` : '';
+    return {
+      type: 'circular-dep' as const,
+      severity: 'error' as const,
+      message: `Circular dependency: ${cycle.join(' → ')} → ${cycle[0]}${more}`,
+      file: cycle[0],
+      details: group.files.join(', '),
+      suggestion: 'Break the cycle by moving the shared code into a file both can import.',
+    };
+  });
 }
 
-export function findComplexFunctions(functions: FunctionInfo[]): CodeIssue[] {
+/** Thresholds: complexity over 10, more than 50 lines, or more than 5 parameters. Over 20 complexity is an error. */
+export function findComplexFunctions(functions: FunctionInfo[], files: FileInfo[]): CodeIssue[] {
+  const source = new Set(files.filter((f) => f.role === 'source').map((f) => f.path));
   return functions
+    .filter((f) => source.has(f.file))
     .filter((f) => f.complexity > 10 || f.lines > 50 || f.parameters.length > 5)
     .map((f) => ({
       type: 'complex' as const,
       severity: (f.complexity > 20 ? 'error' : 'warning') as 'error' | 'warning',
-      message: `Complex function "${f.name}": complexity=${f.complexity}, lines=${f.lines}, params=${f.parameters.length}`,
+      message: `${f.name}: complexity ${f.complexity}, ${f.lines} lines, ${f.parameters.length} parameters`,
       file: f.file,
       line: f.line,
-      suggestion: 'Consider breaking this into smaller functions',
+      suggestion: 'Split it into smaller functions.',
     }));
 }
