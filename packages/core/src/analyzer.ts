@@ -71,7 +71,7 @@ export async function analyzeProject(projectPath: string, options: AnalyzeOption
   const externalPackages = extractExternalPackages(imports);
 
   const packageJsons = [...discovery.packageJsons, ...packageJsonsAbove(root)];
-  const entryPoints = findEntryPoints(root, files, packageJsons, discovery.htmlFiles);
+  const entryPoints = findEntryPoints(root, files, packageJsons, discovery.htmlFiles, discovery.configFiles);
 
   const issues: CodeIssue[] = [
     ...findCircularDependencies(dependencyGraph),

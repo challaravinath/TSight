@@ -196,11 +196,16 @@ export function fileDetail(result: AnalysisResult, filePath: string) {
   const complexity = functions.reduce((s, f) => s + f.complexity, 0);
   const avgComplexity = functions.length > 0 ? Math.round((complexity / functions.length) * 10) / 10 : 0;
 
-  const allExports = [
-    ...classes.filter((c) => c.exported).map((c) => ({ name: c.name, type: 'class', line: c.line })),
-    ...functions.filter((f) => f.exported).map((f) => ({ name: f.name, type: 'function', line: f.line })),
-    ...interfaces.filter((i) => i.exported).map((i) => ({ name: i.name, type: 'interface', line: i.line })),
-  ];
+  // One list of exports, from the same source as the export count.
+  const kindOf = (name: string) =>
+    classes.some((c) => c.name === name)
+      ? 'class'
+      : interfaces.some((i) => i.name === name)
+        ? 'interface'
+        : functions.some((f) => f.name === name && f.exported)
+          ? 'function'
+          : 'export';
+  const allExports = exportNames.map((name) => ({ name, type: kindOf(name), line: result.exportLines[filePath]?.[name] ?? 1 }));
 
   return {
     ...file,
@@ -314,7 +319,8 @@ export function codebaseFacts(result: AnalysisResult) {
       projectImports: r.projectImports,
       unresolved: r.unresolved,
       excluded: r.excluded,
-      percentResolved: r.projectImports > 0 ? Math.round((r.internal / r.projectImports) * 1000) / 10 : 100,
+      // Rounded down, so it never shows 100% while something is missing.
+      percentResolved: r.projectImports > 0 ? Math.floor((r.internal / r.projectImports) * 1000) / 10 : 100,
     },
     items: [
       {

@@ -15,7 +15,7 @@ export function buildDependencyGraph(files: string[], imports: ImportInfo[]): De
     if (imp.kind !== 'internal') continue;
     const key = `${imp.from}\u0000${imp.to}`;
     const existing = edgeMap.get(key);
-    const dynamic = imp.syntax === 'dynamic';
+    const dynamic = imp.syntax === 'dynamic' || imp.lazy === true;
     if (existing) {
       existing.weight++;
       existing.typeOnly = existing.typeOnly && imp.typeOnly;

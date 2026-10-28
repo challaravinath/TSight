@@ -40,7 +40,11 @@ export interface Discovery {
   files: DiscoveredFile[];
   packageJsons: string[]; // relative paths of every package.json seen
   htmlFiles: string[]; // relative paths of .html files, for <script src> entry points
+  /** Other files that can name entry points: wrangler configs, GitHub workflows, tsight.config.json. */
+  configFiles: string[];
 }
+
+const CONFIG_FILE_RE = /(^|\/)(wrangler\.(toml|json|jsonc)|tsight\.config\.json)$|^\.github\/workflows\/[^/]+\.ya?ml$/;
 
 export function toPosix(p: string): string {
   return p.split(path.sep).join('/');
@@ -78,17 +82,19 @@ export function discoverFiles(root: string): Discovery {
   const files: DiscoveredFile[] = [];
   const packageJsons: string[] = [];
   const htmlFiles: string[] = [];
+  const configFiles: string[] = [];
   for (const rel of rels) {
     const segments = rel.split('/');
     if (segments.slice(0, -1).some((s) => NEVER_SOURCE_DIRS.has(s))) continue;
     const name = segments[segments.length - 1];
-    if (name === 'package.json') packageJsons.push(rel);
+    if (CONFIG_FILE_RE.test(rel)) configFiles.push(rel);
+    else if (name === 'package.json') packageJsons.push(rel);
     else if (name.endsWith('.html')) htmlFiles.push(rel);
     else if (!DECLARATION_RE.test(name) && CODE_EXTENSIONS.includes(path.extname(name).toLowerCase())) {
       files.push({ abs: path.join(abs, ...segments), rel, role: fileRole(rel) });
     }
   }
-  return { files, packageJsons, htmlFiles };
+  return { files, packageJsons, htmlFiles, configFiles };
 }
 
 /** Files git tracks or would track under `root`, relative to it. Null outside a repository. */
@@ -137,7 +143,7 @@ function walkFiles(root: string): string[] {
     for (const entry of entries) {
       const rel = relDir ? `${relDir}/${entry.name}` : entry.name;
       const isDir = entry.isDirectory();
-      if (isDir && ALWAYS_SKIPPED_DIRS.has(entry.name)) continue;
+      if (isDir && ALWAYS_SKIPPED_DIRS.has(entry.name)) continue; // .github is kept: workflows name scripts
       if (isIgnored(activeScopes, rel, isDir)) continue;
       if (isDir) walk(path.join(absDir, entry.name), rel, activeScopes);
       else if (entry.isFile()) result.push(rel); // symlinks and sockets are skipped

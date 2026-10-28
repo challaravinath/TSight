@@ -120,7 +120,8 @@ export interface ParameterInfo {
  */
 export type ImportKind = 'internal' | 'external' | 'unresolved' | 'asset' | 'excluded';
 
-export type ImportSyntax = 'import' | 'export' | 'dynamic' | 'require';
+/** 'glob' is Vite's import.meta.glob: one ImportInfo per matched file. */
+export type ImportSyntax = 'import' | 'export' | 'dynamic' | 'require' | 'glob';
 
 export interface ImportInfo {
   from: string; // importing file, relative path
@@ -132,7 +133,8 @@ export interface ImportInfo {
   imports: string[]; // imported names; 'default' for a default import, '*' for namespace, star or dynamic
   isExternal: boolean; // kept for older consumers: true when kind is 'external'
   line: number;
-  resolvedBy?: 'typescript' | 'workspace'; // how an internal target was found
+  resolvedBy?: 'typescript' | 'workspace' | 'glob'; // how an internal target was found
+  lazy?: boolean; // loaded on demand (a non-eager import.meta.glob)
 }
 
 export interface ResolutionStats {

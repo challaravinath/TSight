@@ -154,7 +154,7 @@ describe('entry points and files without importers', () => {
       }),
     );
     const reasons = Object.fromEntries(r.entryPoints.map((e) => [e.file, e.reason]));
-    expect(reasons['src/index.ts']).toBe('package index file');
+    expect(reasons['src/index.ts']).toBe('package.json "main" (built from src)');
     expect(reasons['app/layout.tsx']).toBe('Next.js app router file');
     expect(reasons['middleware.ts']).toBe('Next.js special file');
     expect(reasons['vite.config.ts']).toBe('tool config file');

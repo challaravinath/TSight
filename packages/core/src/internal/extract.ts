@@ -10,6 +10,7 @@ import type {
   ParameterInfo,
   FileRole,
 } from '../types.js';
+import ignore from 'ignore';
 import { ModuleResolver } from './resolve.js';
 import { toPosix } from './discovery.js';
 
@@ -246,6 +247,7 @@ interface RawImport {
   typeOnly: boolean;
   names: string[];
   line: number;
+  eager?: boolean; // import.meta.glob(..., { eager: true })
 }
 
 function collectRawImports(sf: SourceFile): RawImport[] {
@@ -293,6 +295,35 @@ function collectRawImports(sf: SourceFile): RawImport[] {
   // import('x') and require('x') with a literal argument. Walk the raw AST: it is much faster.
   const raw = sf.compilerNode;
   const visit = (node: ts.Node): void => {
+    // import.meta.glob('./pages/*.tsx') and import.meta.glob(['./a/*.ts', '!./a/skip.ts'], { eager: true })
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isMetaProperty(node.expression.expression) &&
+      node.expression.name.text === 'glob' &&
+      node.arguments.length >= 1
+    ) {
+      const first = node.arguments[0];
+      const patterns = ts.isArrayLiteralExpression(first) ? Array.from(first.elements) : [first];
+      const opts = node.arguments[1];
+      const eager =
+        !!opts &&
+        ts.isObjectLiteralExpression(opts) &&
+        opts.properties.some(
+          (pr) => ts.isPropertyAssignment(pr) && pr.name.getText(raw) === 'eager' && pr.initializer.kind === ts.SyntaxKind.TrueKeyword,
+        );
+      const texts = patterns.filter((e): e is ts.StringLiteral => ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)).map((e) => e.text);
+      if (texts.length > 0) {
+        out.push({
+          specifier: texts.join('\u0000'),
+          syntax: 'glob',
+          typeOnly: false,
+          names: ['*'],
+          eager,
+          line: raw.getLineAndCharacterOfPosition(node.getStart(raw)).line + 1,
+        });
+      }
+    }
     if (ts.isCallExpression(node) && node.arguments.length >= 1) {
       const arg = node.arguments[0];
       const literal = ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg) ? arg.text : null;
@@ -327,13 +358,46 @@ function collectRawImports(sf: SourceFile): RawImport[] {
   return out;
 }
 
+/** One import per file an import.meta.glob matches. Patterns are relative to the file, or to the root with a leading /. */
+function expandGlobImport(raw: RawImport, fromRel: string, allRel: string[]): ImportInfo[] {
+  const dir = path.posix.dirname(fromRel) === '.' ? '' : path.posix.dirname(fromRel);
+  const toRootPattern = (pattern: string): string | null => {
+    const negate = pattern.startsWith('!');
+    const body = negate ? pattern.slice(1) : pattern;
+    const joined = body.startsWith('/') ? body.slice(1) : path.posix.normalize(dir ? `${dir}/${body}` : body);
+    if (joined.startsWith('../')) return null;
+    return (negate ? '!/' : '/') + joined;
+  };
+  const patterns = raw.specifier.split('\u0000');
+  const rooted = patterns.map(toRootPattern).filter((p): p is string => p !== null);
+  const base = {
+    from: fromRel,
+    specifier: patterns.join(', '),
+    syntax: 'glob' as const,
+    typeOnly: false,
+    imports: ['*'],
+    isExternal: false,
+    line: raw.line,
+  };
+  if (rooted.length === 0) return [{ ...base, to: base.specifier, kind: 'unresolved' }];
+  const matcher = ignore().add(rooted);
+  const matches = allRel.filter((r) => r !== fromRel && matcher.ignores(r));
+  if (matches.length === 0) return [{ ...base, to: base.specifier, kind: 'asset' }]; // matched only non-code files, or nothing
+  return matches.map((to) => ({ ...base, to, kind: 'internal' as const, resolvedBy: 'glob' as const, lazy: !raw.eager }));
+}
+
 export function extractImports(root: string, parsed: Parsed[], resolver: ModuleResolver): ImportInfo[] {
   const imports: ImportInfo[] = [];
   const rootAbs = path.resolve(root);
 
+  const allRel = parsed.map((p) => p.rel);
   for (const { sf, rel } of parsed) {
     const fromAbs = path.resolve(sf.getFilePath());
     for (const raw of collectRawImports(sf)) {
+      if (raw.syntax === 'glob') {
+        imports.push(...expandGlobImport(raw, rel, allRel));
+        continue;
+      }
       const res = resolver.resolve(raw.specifier, fromAbs);
       const to =
         res.target && (res.kind === 'internal' || res.kind === 'excluded')
