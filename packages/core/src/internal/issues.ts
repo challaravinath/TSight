@@ -92,7 +92,7 @@ export function findComplexFunctions(functions: FunctionInfo[], files: FileInfo[
     .map((f) => ({
       type: 'complex' as const,
       severity: (f.complexity > 20 ? 'error' : 'warning') as 'error' | 'warning',
-      message: `${f.name}: complexity ${f.complexity}, ${f.lines} lines, ${f.parameters.length} parameters`,
+      message: `${f.name}: complexity ${f.complexity}, ${f.lines} lines, ${f.parameters.length} parameter${f.parameters.length === 1 ? '' : 's'}`,
       file: f.file,
       line: f.line,
       suggestion: 'Split it into smaller functions.',

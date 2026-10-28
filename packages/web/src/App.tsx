@@ -56,7 +56,7 @@ interface BlastRadius {
 }
 
 interface CodebaseFacts {
-  resolution: { internal: number; projectImports: number; unresolved: number; percentResolved: number };
+  resolution: { internal: number; projectImports: number; unresolved: number; excluded: number; percentResolved: number };
   items: Array<{ rule: string; count: number; items: string[] }>;
 }
 
@@ -766,6 +766,7 @@ These files have identical content — consider consolidating:
                         {facts.resolution.unresolved === 0
                           ? 'Every import of project code was matched to a file, so the numbers below cover the whole graph.'
                           : `${facts.resolution.unresolved} imports point at project code that could not be found. Numbers that depend on imports may be missing those links.`}
+                        {facts.resolution.excluded > 0 && ` ${facts.resolution.excluded} more point at files outside this analysis (another folder, an ignored file or a .d.ts) and are not counted.`}
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                         {facts.items.map((b) => (
@@ -886,7 +887,7 @@ These files have identical content — consider consolidating:
                         fontSize: '0.8125rem',
                         color: 'var(--text3)'
                       }}>
-                        100% identical files — safe to consolidate
+                        Files with the same code once whitespace and comments are ignored
                       </div>
                     )}
                     {expandedSections.duplicates && (
@@ -897,7 +898,7 @@ These files have identical content — consider consolidating:
                         borderTop: 'none',
                         borderRadius: '0 0 var(--radius) var(--radius)'
                       }}>
-                        <p className="hint" style={{ marginBottom: 'var(--space-md)' }}>100% identical files — safe to consolidate</p>
+                        <p className="hint" style={{ marginBottom: 'var(--space-md)' }}>Files with the same code once whitespace and comments are ignored</p>
                         {analysis.duplicates.length === 0 ? (
                           <div style={{ color: 'var(--text3)', textAlign: 'center', padding: 'var(--space-md)' }}>✓ No duplicates found</div>
                         ) : (

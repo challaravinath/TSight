@@ -54,7 +54,10 @@ const CLONE_TIMEOUT_MS = 120_000;
 const CLONE_TMP_ROOT = path.join(os.tmpdir(), 'tsight-repos');
 const CLONE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-const ALLOWED_ORIGINS = (process.env.TSIGHT_CORS_ORIGIN || 'http://localhost:3000,http://localhost:3001')
+const ALLOWED_ORIGINS = (
+  process.env.TSIGHT_CORS_ORIGIN ||
+  'http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001'
+)
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
@@ -184,7 +187,13 @@ function requireAnalysis(res: express.Response): Current | null {
 }
 
 async function history(c: Current): Promise<GitHistory> {
-  if (!c.history) c.history = readGitHistory(c.analysis.root);
+  if (!c.history) {
+    c.history = readGitHistory(c.analysis.root);
+    // A failure (say, a timeout) should not stick: the next request tries again.
+    c.history.catch(() => {
+      if (current === c) c.history = undefined;
+    });
+  }
   return c.history;
 }
 
@@ -192,8 +201,17 @@ async function runAnalysis(projectPath: string, name: string) {
   const id = ++runId;
   const analysis = await analyzeProject(projectPath, { log: (m) => console.log(`   ${m}`) });
   if (id !== runId) throw new Error('A newer analysis was started');
+  const previous = current;
   current = { project: { path: projectPath, name, status: 'ready' }, analysis };
+  if (previous && previous.project.path !== projectPath) removeIfClone(previous.project.path);
   return current;
+}
+
+/** Delete a folder only if it is one of our temporary clones. */
+function removeIfClone(dir: string): void {
+  const rel = path.relative(CLONE_TMP_ROOT, dir);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return;
+  fs.rm(dir, { recursive: true, force: true }, () => {});
 }
 
 const sourceFiles = (a: AnalysisResult) => a.files.filter((f) => f.role === 'source').map((f) => f.path);
@@ -236,10 +254,10 @@ app.post('/api/analyze/github', async (req, res) => {
   }
 
   const repoName = url.replace(/\/$/, '').replace(/\.git$/, '').split('/').pop() || 'repo';
-  fs.mkdirSync(CLONE_TMP_ROOT, { recursive: true });
   const tempDir = path.join(CLONE_TMP_ROOT, `${repoName}-${Date.now()}`);
 
   try {
+    fs.mkdirSync(CLONE_TMP_ROOT, { recursive: true });
     console.log(`Cloning ${url}`);
     const git = simpleGit({ timeout: { block: CLONE_TIMEOUT_MS } });
     await git.clone(url, tempDir, ['--filter=blob:none', '--no-tags', '--single-branch']);
@@ -272,8 +290,8 @@ app.get('/api/overview', (_req, res) => {
     mentalModel: a.mentalModel,
     resolution: a.resolution,
     entryPoints: a.entryPoints,
-    issues: a.issues.slice(0, 10),
-    duplicates: a.duplicates.slice(0, 5),
+    issues: a.issues,
+    duplicates: a.duplicates,
   });
 });
 
@@ -556,6 +574,7 @@ app.use((err: Error & { status?: number; type?: string }, _req: express.Request,
 });
 
 cleanupOldClones();
+setInterval(cleanupOldClones, 60 * 60 * 1000).unref();
 
 app.listen(PORT, HOST, () => {
   const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;

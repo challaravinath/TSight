@@ -31,11 +31,13 @@ Every number can be traced back to your code. This is how each one is worked out
 
 **Hotspots.** Files that are complex and imported by many other files. The score is the file's total cyclomatic complexity times the number of source files that import it. For example, complexity 18 and 34 dependents gives 612.
 
-**Complexity.** Standard cyclomatic complexity: 1, plus 1 for each `if`, `?:`, loop, `case`, `catch`, `&&`, `||` and `??`. Every function, method, constructor and named arrow function gets its own score. An inline callback, like the one you pass to `map` or `useEffect`, counts toward the function it sits in.
+**Complexity.** Standard cyclomatic complexity: 1, plus 1 for each `if`, `?:`, loop, `case`, `catch`, `&&`, `||` and `??`. Every function, method, constructor and named arrow function gets its own score. An inline callback, like the one you pass to `map` or `useEffect`, counts toward the function it sits in. One at the top level of a file, like `forwardRef(...)` or a route handler, is scored on its own.
 
 **Cycles.** Groups of files that import each other in a loop, found with a strongly connected components search. Type-only imports and `import()` calls are left out, because they can't cause load-order problems at runtime.
 
 **Duplicate files.** Files with the same code once whitespace and comments are ignored. Each group says whether the files are also identical byte for byte.
+
+**Which files are analyzed.** In a git repository, the files git tracks plus new files that aren't ignored, exactly as `git ls-files` lists them. Outside git, every file except those in `.gitignore` and common build folders such as `dist` and `node_modules`.
 
 **Structural twins.** Functions whose syntax is the same once you ignore variable names and literal values. These are usually copies. Each pair says whether the names and values match too.
 
@@ -54,10 +56,12 @@ Every number can be traced back to your code. This is how each one is worked out
 
 ```bash
 docker build -t tsight .
-docker run -p 3000:3000 -v "/path/to/your/code:/code" tsight
+docker run -p 127.0.0.1:3000:3000 -v "/path/to/your/code:/code" tsight
 ```
 
-Open http://localhost:3000 and enter a path under `/code`, for example `/code/my-project`. If you open TSight from another machine on your network, add that host name with `-e TSIGHT_ALLOWED_HOSTS=192.168.1.20`.
+Open http://localhost:3000 and enter a path under `/code`, for example `/code/my-project`.
+
+The command above only lets your own computer reach TSight. There is no login, so anyone who can reach it can read the analysis of everything under `/code`. If you still want to open it from another machine, publish the port with `-p 3000:3000` and add that machine's address for your server with `-e TSIGHT_ALLOWED_HOSTS=192.168.1.20`.
 
 ## Running it from source
 

@@ -313,6 +313,7 @@ export function codebaseFacts(result: AnalysisResult) {
       internal: r.internal,
       projectImports: r.projectImports,
       unresolved: r.unresolved,
+      excluded: r.excluded,
       percentResolved: r.projectImports > 0 ? Math.round((r.internal / r.projectImports) * 1000) / 10 : 100,
     },
     items: [

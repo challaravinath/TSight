@@ -8,7 +8,9 @@ services:
   tsight:
     build: .
     ports:
-      - "3000:3000"
+      # Only this computer can reach TSight. To open it from other machines,
+      # use "3000:3000" and set TSIGHT_ALLOWED_HOSTS. There is no login.
+      - "127.0.0.1:3000:3000"
     volumes:
       # Change this to your code folder.
       # Windows:   - "C:/Projects:/code"

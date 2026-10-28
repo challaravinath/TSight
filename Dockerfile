@@ -1,5 +1,5 @@
 # Build:  docker build -t tsight .
-# Run:    docker run -p 3000:3000 -v "/path/to/your/code:/code" tsight
+# Run:    docker run -p 127.0.0.1:3000:3000 -v "/path/to/your/code:/code" tsight
 # Then open http://localhost:3000 and enter /code/your-project
 
 FROM node:22-alpine
