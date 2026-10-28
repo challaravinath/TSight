@@ -154,7 +154,7 @@ More detail on each screen is in the [guide](GUIDE.md).
 
 ## Contributing
 
-Issues and pull requests are welcome. If you change how a number is calculated, add a test in `packages/core/test` that shows the case it fixes.
+Issues and pull requests are welcome. See [CONTRIBUTING.md](../CONTRIBUTING.md) for how to set up and what a change needs, and [CHANGELOG.md](../CHANGELOG.md) for what changed in each release. Please report security problems privately, as described in [SECURITY.md](../SECURITY.md).
 
 ## License
 

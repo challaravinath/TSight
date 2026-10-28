@@ -1,0 +1,16 @@
+name: Idea
+description: Something TSight could show or do
+labels: [idea]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: The question you want answered
+      description: What do you want to know about a codebase that TSight doesn't tell you yet?
+    validations:
+      required: true
+  - type: textarea
+    id: facts
+    attributes:
+      label: Where the answer would come from
+      description: Which facts in the code or the git history would answer it? TSight only shows numbers it can back with a list.

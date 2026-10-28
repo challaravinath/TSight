@@ -1,0 +1,28 @@
+name: Something is wrong
+description: A number that looks wrong, an error, or something that doesn't work
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead. If a number looks wrong, open its list and say which entries are wrong or missing.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to see it
+      description: The command you ran, and the repository if it's public (with the commit, if you can).
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: TSight version
+      description: The output of `tsight --version`, or the commit you built from.
+  - type: input
+    id: env
+    attributes:
+      label: Operating system and Node.js version
+      placeholder: Windows 11, Node 22.11
