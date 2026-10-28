@@ -2,6 +2,11 @@
 
 All notable changes to TSight. Versions follow [semantic versioning](https://semver.org): a change to the snapshot format or the command line options that breaks existing use goes in a new major version.
 
+## Unreleased
+
+### Changed
+- TSight is no longer published to npm. Run it from a clone of this repository; the README has the steps.
+
 ## 3.0.2 (2026-10-28)
 
 ### Changed

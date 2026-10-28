@@ -1,6 +1,6 @@
 # @tsight/core
 
-The analysis engine behind [TSight](https://www.npmjs.com/package/tsight). It reads a TypeScript or JavaScript project and its git history and returns facts: resolved imports, per-function complexity, dependency cycles, entry points, copied code, change hotspots and authorship. No AI, no estimates.
+The analysis engine behind [TSight](https://github.com/challaravinath/TSight). It reads a TypeScript or JavaScript project and its git history and returns facts: resolved imports, per-function complexity, dependency cycles, entry points, copied code, change hotspots and authorship. No AI, no estimates.
 
 Most people want the `tsight` command instead. Use this package to build your own reports or checks.
 

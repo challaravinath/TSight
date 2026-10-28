@@ -1,17 +1,9 @@
-# Push a tag like v3.0.2 to make a release:
+# Push a tag like v3.0.2 to make a release. A GitHub release is created with
+# notes from that version's section in CHANGELOG.md and a sample report attached.
+# TSight isn't published to npm.
 #
-# 1. The npm packages are submitted to npm's staging area through trusted
-#    publishing, so no token is stored anywhere. Nothing goes live yet.
-# 2. A GitHub release is created with notes from that version's section in
-#    CHANGELOG.md and a sample report attached.
-#
-# Then approve the staged packages on npmjs.com (Staged Packages) or with
-# `npm stage approve <id>`, in the order @tsight/core, @tsight/api, tsight.
-# Approval needs your two-factor code, so a release cannot reach users without you.
-#
-# A tag with a hyphen, like v3.0.2-rc.0, is a test release. It goes to npm under
-# the "next" label, so `npx tsight` keeps installing the current version, and the
-# GitHub release is marked as a pre-release.
+# A tag with a hyphen, like v3.0.2-rc.0, is a test release. The GitHub release
+# is marked as a pre-release.
 name: Release
 
 on:
@@ -20,7 +12,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write # lets npm confirm the packages were built by this workflow
 
 jobs:
   release:
@@ -33,9 +24,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          registry-url: https://registry.npmjs.org
-      # Staged publishing needs npm 11.15.0 or later.
-      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm run build
       - run: npm test
@@ -59,29 +47,12 @@ jobs:
           ' CHANGELOG.md > notes.md
           if [ ! -s notes.md ]; then
             if [[ "$version" == *-* ]]; then
-              echo "Test release. Install it with \`npx tsight@next\`. It is not meant for general use." > notes.md
+              echo "Test release. It is not meant for general use." > notes.md
             else
               echo "::error::CHANGELOG.md has no section for $version"
               exit 1
             fi
           fi
-
-      - name: Submit to npm for approval
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          # Test releases (versions with a hyphen) go under "next", so "latest" stays where it is.
-          label=latest
-          if [[ "$version" == *-* ]]; then label=next; fi
-          # A version that is already on npm is skipped, so the job can be re-run.
-          for dir in core api cli; do
-            pkg=$(node -p "require('./packages/$dir/package.json').name")
-            if npm view "$pkg@$version" version >/dev/null 2>&1; then
-              echo "$pkg@$version is already on npm"
-            else
-              (cd "packages/$dir" && npm stage publish --tag "$label")
-              echo "::notice::$pkg@$version is staged under \"$label\". Approve it on npmjs.com under Staged Packages."
-            fi
-          done
 
       - name: Sample report of TSight itself
         run: node packages/cli/dist/cli.js report . --out "tsight-report-${GITHUB_REF_NAME}.html"

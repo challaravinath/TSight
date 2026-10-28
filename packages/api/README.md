@@ -1,6 +1,6 @@
 # @tsight/api
 
-The server behind [TSight](https://www.npmjs.com/package/tsight). It runs the analysis from [@tsight/core](https://www.npmjs.com/package/@tsight/core) in a worker thread, so the page stays responsive on large projects, and serves a built web UI from `webDir` when you give it one. The `tsight` package ships the UI and does this for you.
+The server behind [TSight](https://github.com/challaravinath/TSight). It runs the analysis from `@tsight/core` in a worker thread, so the page stays responsive on large projects, and serves a built web UI from `webDir` when you give it one. The `tsight` command ships the UI and does this for you.
 
 Most people want the `tsight` command instead. Use this package to embed the server in your own tooling.
 
