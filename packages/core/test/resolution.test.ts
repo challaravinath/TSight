@@ -62,6 +62,53 @@ describe('import resolution', () => {
     expect(r.imports.filter((i) => i.resolvedBy === 'workspace')).toHaveLength(2);
   });
 
+  it('follows package.json imports (#lib/...) to the file they name', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'docs', imports: { '#lib': './src/lib/index.js', '#lib/*': './src/lib/*' } }),
+      'src/lib/index.ts': 'export const all = 1;\n',
+      'src/lib/utils/docs.ts': 'export const getDoc = 1;\n',
+      'src/lib/Card.svelte': '<script>\n  export let title = "";\n</script>\n',
+      'src/page.ts': "import { all } from '#lib';\nimport { getDoc } from '#lib/utils/docs.js';\nimport Card from '#lib/Card.svelte';\nimport { x } from '#lib/missing.js';\nexport const p = [all, getDoc, Card, x];\n",
+    });
+    const r = await analyzeProject(root);
+    expect(internalEdges(r)).toEqual([
+      'src/page.ts -> src/lib/Card.svelte',
+      'src/page.ts -> src/lib/index.ts',
+      'src/page.ts -> src/lib/utils/docs.ts',
+    ]);
+    expect(r.resolution.unresolvedImports.map((u) => u.specifier)).toEqual(['#lib/missing.js']);
+  });
+
+  it('maps imports of a dist/ folder that is not built to the source it comes from', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'mono', private: true, workspaces: ['packages/*'] }),
+      'packages/ui/package.json': JSON.stringify({ name: 'ui', exports: { '.': { types: './dist/index.d.ts', svelte: './dist/index.js' } } }),
+      'packages/ui/src/lib/index.ts': 'export const Button = 1;\n',
+      'packages/core/package.json': JSON.stringify({ name: 'core' }),
+      'packages/core/src/app/render.ts': 'export const render = 1;\n',
+      'packages/core/test/render.test.ts': "import { render } from '../dist/app/render.js';\nimport { Button } from 'ui';\nexport const t = [render, Button];\n",
+    });
+    const r = await analyzeProject(root);
+    expect(internalEdges(r)).toEqual([
+      'packages/core/test/render.test.ts -> packages/core/src/app/render.ts',
+      'packages/core/test/render.test.ts -> packages/ui/src/lib/index.ts',
+    ]);
+    // The relative one; 'ui' is found through the workspace.
+    expect(r.imports.filter((i) => i.resolvedBy === 'build-output')).toHaveLength(1);
+  });
+
+  it('counts a workspace import of a hand-written .d.ts file as resolved', async () => {
+    const root = makeProject({
+      'package.json': JSON.stringify({ name: 'mono', private: true, workspaces: ['packages/*'] }),
+      'packages/types/package.json': JSON.stringify({ name: '@acme/types' }),
+      'packages/types/Calendar.d.ts': 'export interface Calendar { id: string }\n',
+      'packages/app/package.json': JSON.stringify({ name: '@acme/app' }),
+      'packages/app/src/main.ts': "import type { Calendar } from '@acme/types/Calendar';\nexport const c = {} as Calendar;\n",
+    });
+    const r = await analyzeProject(root);
+    expect(r.resolution.unresolved).toBe(0);
+  });
+
   it('finds re-exports, dynamic imports, require calls and type-only imports', async () => {
     const root = makeProject({
       'index.ts': "export * from './a';\nexport { b } from './b';\n",

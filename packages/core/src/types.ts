@@ -131,9 +131,11 @@ export interface ImportInfo {
   syntax: ImportSyntax;
   typeOnly: boolean;
   imports: string[]; // imported names; 'default' for a default import, '*' for namespace, star or dynamic
+  /** For `export ... from`: the name each entry of `imports` is exported as from this file. `export * from` has none. */
+  exportedAs?: string[];
   isExternal: boolean; // kept for older consumers: true when kind is 'external'
   line: number;
-  resolvedBy?: 'typescript' | 'workspace' | 'glob' | 'framework'; // how an internal target was found
+  resolvedBy?: 'typescript' | 'workspace' | 'glob' | 'framework' | 'package-imports' | 'build-output'; // how an internal target was found
   lazy?: boolean; // loaded on demand (a non-eager import.meta.glob)
 }
 
@@ -182,6 +184,8 @@ export interface DependencyGraph {
 export interface EntryPoint {
   file: string;
   reason: string; // which rule marked it, for example "package.json main" or "Next.js app router file"
+  /** Reached only through declaration files (.d.ts), so only its types are public. */
+  typesOnly?: true;
 }
 
 // ============================================================================
@@ -344,6 +348,10 @@ export interface AnalysisResult {
   exportsByFile: Record<string, string[]>;
   /** Line of each export's declaration, per file. */
   exportLines: Record<string, Record<string, number>>;
+  /** Exports no file uses, following re-exports to where each name is declared. */
+  unusedExports: Array<{ file: string; name: string; line: number; kind: 'value' | 'type'; onlyTests: boolean }>;
+  /** What the unused exports were counted from. */
+  exportStats: { totalExports: number; filesUsedAsAWhole: number };
 
   mentalModel: MentalModel;
 

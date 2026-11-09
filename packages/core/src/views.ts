@@ -264,43 +264,21 @@ export function fileDetail(result: AnalysisResult, filePath: string) {
 }
 
 /**
- * Exports that no analyzed file imports by name.
- * Skipped: entry-point files (their exports are public API) and files that
- * are reached through `import *`, `export *`, `import()` or `require()`,
- * because those can use any export.
+ * Exports that no file uses, following re-exports through barrel files.
+ * Exports only tests use are included and marked. See internal/unused-exports.ts.
+ * `skippedFiles` counts files whose exports all count as used because something
+ * loads the whole file (an entry point, `import *`, `import()` or `require()`).
  */
 export function unusedExports(result: AnalysisResult) {
-  const used = new Map<string, Set<string>>();
-  for (const imp of result.imports) {
-    if (imp.kind !== 'internal' || imp.from === imp.to) continue;
-    if (!used.has(imp.to)) used.set(imp.to, new Set());
-    for (const name of imp.imports) used.get(imp.to)!.add(name);
-  }
-  const entries = new Set(result.entryPoints.map((e) => e.file));
-
-  const out: Array<{ file: string; name: string; type: string; line: number }> = [];
-  let totalExports = 0;
-  let skippedFiles = 0;
-  const roles = new Map(result.files.map((f) => [f.path, f.role] as const));
-  for (const [file, names] of Object.entries(result.exportsByFile)) {
-    if (roles.get(file) !== 'source') continue;
-    totalExports += names.length;
-    const u = used.get(file);
-    if (entries.has(file) || u?.has('*')) {
-      if (names.length > 0) skippedFiles++;
-      continue;
-    }
-    for (const name of names) {
-      if (u?.has(name)) continue;
-      out.push({ file, name, type: 'export', line: result.exportLines[file]?.[name] ?? 1 });
-    }
-  }
+  const out = result.unusedExports.map((u) => ({ file: u.file, name: u.name, type: u.kind === 'type' ? 'type' : 'export', line: u.line, onlyTests: u.onlyTests }));
+  const totalExports = result.exportStats.totalExports;
+  const unused = out.filter((u) => !u.onlyTests).length;
   return {
     unusedExports: out,
     count: out.length,
     totalExports,
-    skippedFiles,
-    usedPercent: totalExports > 0 ? Math.round(((totalExports - out.length) / totalExports) * 100) : 100,
+    skippedFiles: result.exportStats.filesUsedAsAWhole,
+    usedPercent: totalExports > 0 ? Math.round(((totalExports - unused) / totalExports) * 100) : 100,
   };
 }
 

@@ -23,7 +23,11 @@ export function findDuplicates(parsed: Parsed[]): DuplicateGroup[] {
     // but different templates would look identical. They are left out.
     if (isComponentFile(rel)) continue;
     const text = sf.getFullText();
-    const tokens = tokenize(sf.compilerNode);
+    // Tokens come from a throwaway parse of the file. getChildren() stores a token
+    // node on every node it visits, for good; on the shared parse that grew the heap
+    // past 8 GB on a 15,000-file project. This copy is freed after each file.
+    const copy = ts.createSourceFile(sf.getFilePath(), text, ts.ScriptTarget.Latest, false, sf.getScriptKind());
+    const tokens = tokenize(copy);
     if (tokens.length < MIN_DUPLICATE_TOKENS) continue;
     const tokenHash = sha1(tokens.join('\u0000'));
     const bytesHash = sha1(text);

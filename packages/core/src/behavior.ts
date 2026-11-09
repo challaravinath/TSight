@@ -85,20 +85,28 @@ export function coChanges(result: AnalysisResult, commits: GitCommit[], options:
   const sinceMs = options.since ? options.since.getTime() : -Infinity;
   const source = new Set(result.files.filter((f) => f.role === 'source').map((f) => f.path));
 
+  // Large commits are left out of both counts, so "14 of 16" compares like with like.
+  const counted: string[][] = [];
   const fileCommits = new Map<string, number>();
-  const pairs = new Map<string, number>();
   for (const c of commits) {
     if (c.bot || Date.parse(c.date) < sinceMs) continue;
-    // Large commits are left out of both counts, so "14 of 16" compares like with like.
     if (c.files.length > MAX_FILES_PER_COMMIT) continue;
     const files = Array.from(new Set(c.files.filter((f) => source.has(f)))).sort();
     for (const f of files) fileCommits.set(f, (fileCommits.get(f) ?? 0) + 1);
-    if (files.length < 2) continue;
+    if (files.length >= 2) counted.push(files);
+  }
+
+  // A pair needs minTogether shared commits, so a file with fewer commits than that
+  // can't be in one. Leaving those files out, and keeping one small map per file
+  // instead of one map of all pairs, keeps long histories (100,000+ commits) under
+  // the size limit of a single Map.
+  const pairs = new Map<string, Map<string, number>>();
+  for (const all of counted) {
+    const files = all.filter((f) => (fileCommits.get(f) ?? 0) >= minTogether);
     for (let i = 0; i < files.length; i++) {
-      for (let j = i + 1; j < files.length; j++) {
-        const key = `${files[i]}\u0000${files[j]}`;
-        pairs.set(key, (pairs.get(key) ?? 0) + 1);
-      }
+      let row = pairs.get(files[i]);
+      if (!row) pairs.set(files[i], (row = new Map()));
+      for (let j = i + 1; j < files.length; j++) row.set(files[j], (row.get(files[j]) ?? 0) + 1);
     }
   }
 
@@ -109,14 +117,15 @@ export function coChanges(result: AnalysisResult, commits: GitCommit[], options:
   }
 
   const out: CoChange[] = [];
-  for (const [key, together] of pairs) {
-    if (together < minTogether) continue;
-    const [a, b] = key.split('\u0000');
-    const commitsA = fileCommits.get(a) ?? 0;
-    const commitsB = fileCommits.get(b) ?? 0;
-    const confidence = together / Math.min(commitsA, commitsB);
-    if (confidence < minConfidence) continue;
-    out.push({ a, b, together, commitsA, commitsB, confidence: Math.round(confidence * 100) / 100, hidden: !linked.has(key) });
+  for (const [a, row] of pairs) {
+    for (const [b, together] of row) {
+      if (together < minTogether) continue;
+      const commitsA = fileCommits.get(a) ?? 0;
+      const commitsB = fileCommits.get(b) ?? 0;
+      const confidence = together / Math.min(commitsA, commitsB);
+      if (confidence < minConfidence) continue;
+      out.push({ a, b, together, commitsA, commitsB, confidence: Math.round(confidence * 100) / 100, hidden: !linked.has(`${a}\u0000${b}`) });
+    }
   }
   return out.sort((x, y) => y.together - x.together || y.confidence - x.confidence || x.a.localeCompare(y.a));
 }

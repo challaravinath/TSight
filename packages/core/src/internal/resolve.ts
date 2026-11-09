@@ -20,7 +20,7 @@ const BUILTINS = new Set(builtinModules);
 export interface Resolution {
   kind: ImportKind;
   target?: string; // absolute path, when a file was found
-  resolvedBy?: 'typescript' | 'workspace' | 'framework';
+  resolvedBy?: 'typescript' | 'workspace' | 'framework' | 'package-imports' | 'build-output';
 }
 
 interface ConfigEntry {
@@ -120,6 +120,8 @@ export class ModuleResolver {
         // Built output or a declaration file: prefer the source file next to it.
         const source = this.sourceFor(target);
         if (source) return { kind: 'internal', target: source, resolvedBy: 'typescript' };
+        const built = this.fromBuildOutput(target);
+        if (built) return { kind: 'internal', target: built, resolvedBy: 'build-output' };
       }
       if (isBare) {
         const ws = this.resolveWorkspace(cleanSpec);
@@ -130,6 +132,8 @@ export class ModuleResolver {
 
     if (ext && ASSET_EXTENSIONS.has(ext)) return { kind: 'asset' };
     if (isBare) {
+      const pi = this.resolvePackageImports(cleanSpec, fromAbs);
+      if (pi) return { kind: 'internal', target: pi, resolvedBy: 'package-imports' };
       const ws = this.resolveWorkspace(cleanSpec);
       if (ws) return { kind: 'internal', target: ws, resolvedBy: 'workspace' };
       const fw = this.resolveFrameworkAlias(cleanSpec, fromAbs);
@@ -137,7 +141,14 @@ export class ModuleResolver {
     }
     // SvelteKit writes ./$types for every route while it builds; it is not in the repository.
     if (/^\.\/\$types(\.js)?$/.test(cleanSpec) && this.configDir(path.dirname(fromAbs), /^svelte\.config\.[cm]?[jt]s$/)) return { kind: 'external' };
-    if (isRelative) return { kind: 'unresolved' };
+    if (isRelative) {
+      // Tests often import the built file (../dist/x.js), which a fresh clone doesn't have.
+      const built = this.fromBuildOutput(path.resolve(path.dirname(fromAbs), cleanSpec));
+      if (built) return { kind: 'internal', target: built, resolvedBy: 'build-output' };
+      return { kind: 'unresolved' };
+    }
+    // A workspace package that ships hand-written .d.ts files (pkg/Calendar → Calendar.d.ts).
+    if (this.workspaceDeclaration(cleanSpec)) return { kind: 'excluded' };
     if (cleanSpec.startsWith('node:') || BUILTINS.has(cleanSpec.split('/')[0])) return { kind: 'external' };
     // Modules Nuxt generates at build time (#imports, #components, #app, ...): they come from the nuxt package, not the project.
     if (NUXT_VIRTUAL.test(cleanSpec) && this.configDir(path.dirname(fromAbs), /^nuxt\.config\.[cm]?[jt]s$/)) return { kind: 'external' };
@@ -179,6 +190,8 @@ export class ModuleResolver {
       if (this.classifyTarget(real) === 'internal') return { kind: 'internal', target: real, resolvedBy: 'typescript' };
     }
     if (!isRelative) {
+      const pi = this.resolvePackageImports(spec, fromAbs);
+      if (pi) return { kind: 'internal', target: pi, resolvedBy: 'package-imports' };
       const ws = this.resolveWorkspace(spec);
       if (ws) return { kind: 'internal', target: ws, resolvedBy: 'workspace' };
       const fw = this.resolveFrameworkAlias(spec, fromAbs);
@@ -218,6 +231,76 @@ export class ModuleResolver {
     const shared = spec.match(/^#shared(?:\/(.*))?$/);
     if (shared) return lookFor(/^nuxt\.config\.[cm]?[jt]s$/, (d) => [path.join(d, 'shared')], shared[1] ?? 'index');
     return null;
+  }
+
+  /**
+   * `#lib/utils.js` through the `imports` field of the nearest package.json,
+   * the way Node does. TypeScript only reads that field under some module
+   * resolution settings, and a tsconfig that extends a generated one
+   * (.svelte-kit/tsconfig.json) falls back to settings that don't.
+   */
+  private resolvePackageImports(spec: string, fromAbs: string): string | null {
+    if (!spec.startsWith('#')) return null;
+    const dir = this.configDir(path.dirname(fromAbs), /^package\.json$/);
+    const imports = dir ? this.packageJson(dir)?.imports : null;
+    if (!dir || !imports || typeof imports !== 'object') return null;
+    for (const target of subpathTargets(imports, spec)) {
+      const hit = this.findAnalyzed(path.resolve(dir, target));
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  /**
+   * A path inside a dist/ folder, mapped to the source it is built from:
+   * dist/a/b.js is src/a/b.ts, or src/lib/a/b.ts (svelte-package's layout).
+   * Only counts when that source file is analyzed.
+   */
+  private fromBuildOutput(abs: string): string | null {
+    const posix = toPosix(abs);
+    const at = posix.lastIndexOf('/dist/');
+    if (at === -1) return null;
+    const rest = posix.slice(at + '/dist/'.length).replace(/\.d\.[cm]?ts$/i, '.js');
+    for (const src of ['src', 'src/lib']) {
+      const hit = this.findAnalyzed(path.join(abs.slice(0, at), src, rest));
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  /** The analyzed file a path names: as written, with a code extension, or as a folder index. */
+  private findAnalyzed(abs: string): string | null {
+    for (const c of [realPath(path.resolve(abs)), ...withExtensions(abs), ...withExtensions(path.join(abs, 'index'))]) {
+      if (this.analyzed.has(c)) return c;
+    }
+    return null;
+  }
+
+  private readonly packageJsons = new Map<string, any>();
+
+  private packageJson(dir: string): any {
+    if (!this.packageJsons.has(dir)) {
+      let pkg = null;
+      try {
+        pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+      } catch {
+        // no package.json, or not valid JSON
+      }
+      this.packageJsons.set(dir, pkg);
+    }
+    return this.packageJsons.get(dir);
+  }
+
+  /** True when a workspace package has a .d.ts file for `pkg/sub`. */
+  private workspaceDeclaration(spec: string): boolean {
+    for (const [name, dir] of this.workspaces) {
+      if (!spec.startsWith(name + '/')) continue;
+      const sub = spec.slice(name.length + 1).replace(/\.[cm]?js$/, '');
+      for (const base of [path.join(dir, sub), path.join(dir, 'src', sub)]) {
+        if (fs.existsSync(base + '.d.ts') || fs.existsSync(path.join(base, 'index.d.ts'))) return true;
+      }
+    }
+    return false;
   }
 
   private readonly configDirs = new Map<string, string | null>();
@@ -361,9 +444,43 @@ export class ModuleResolver {
       for (const c of candidates) {
         if (this.analyzed.has(c)) return c;
       }
+      // The package points at its build output (exports, main, svelte): use the source of that.
+      const pkg = this.packageJson(dir);
+      const exp = pkg?.exports;
+      // "exports": "./dist/index.js" and "exports": { "import": ... } are both shorthand for ".".
+      const subpaths = exp == null ? null : typeof exp === 'object' && !Array.isArray(exp) && Object.keys(exp).some((k) => k.startsWith('.')) ? exp : { '.': exp };
+      const targets = subpaths ? subpathTargets(subpaths, sub ? `./${sub}` : '.') : [];
+      if (!sub) targets.push(...[pkg?.svelte, pkg?.module, pkg?.main, pkg?.types].filter((v): v is string => typeof v === 'string'));
+      for (const t of targets) {
+        const hit = this.fromBuildOutput(path.resolve(dir, t));
+        if (hit) return hit;
+      }
     }
     return null;
   }
+}
+
+/**
+ * The paths a package.json `exports` or `imports` map gives for a key, with
+ * `*` patterns filled in. Condition objects ({ types, svelte, default }) give
+ * every path they list, in order.
+ */
+function subpathTargets(map: Record<string, unknown>, key: string): string[] {
+  const flatten = (v: unknown): string[] =>
+    typeof v === 'string' ? [v] : Array.isArray(v) ? v.flatMap(flatten) : v && typeof v === 'object' ? Object.values(v).flatMap(flatten) : [];
+  if (key in map) return flatten(map[key]);
+  let best: { prefix: string; suffix: string; value: unknown } | null = null;
+  for (const [pattern, value] of Object.entries(map)) {
+    const star = pattern.indexOf('*');
+    if (star === -1) continue;
+    const prefix = pattern.slice(0, star);
+    const suffix = pattern.slice(star + 1);
+    if (key.length < prefix.length + suffix.length || !key.startsWith(prefix) || !key.endsWith(suffix)) continue;
+    if (!best || prefix.length > best.prefix.length) best = { prefix, suffix, value };
+  }
+  if (!best) return [];
+  const middle = key.slice(best.prefix.length, key.length - best.suffix.length);
+  return flatten(best.value).map((t) => t.replace(/\*/g, middle));
 }
 
 /** The nearest folder from startDir up to root that holds a file matching name. */

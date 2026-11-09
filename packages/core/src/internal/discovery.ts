@@ -51,6 +51,8 @@ export interface Discovery {
   docFiles: string[]; // relative paths of .md and .mdx files, whose import lines can load components
   /** Other files that can name entry points: wrangler configs, angular.json, GitHub workflows, tsight.config.json. */
   configFiles: string[];
+  /** Hand-written .d.ts files, outside build folders. Not analyzed, but read for the imports they make. */
+  declarationFiles: string[];
 }
 
 const CONFIG_FILE_RE = /(^|\/)(wrangler\.(toml|json|jsonc)|tsight\.config\.json|angular\.json)$|^\.github\/workflows\/[^/]+\.ya?ml$/;
@@ -93,10 +95,16 @@ export function discoverFiles(root: string): Discovery {
   const htmlFiles: string[] = [];
   const configFiles: string[] = [];
   const docFiles: string[] = [];
+  const declarationFiles: string[] = [];
   for (const rel of rels) {
     const segments = rel.split('/');
     if (segments.slice(0, -1).some((s) => NEVER_SOURCE_DIRS.has(s))) continue;
     const name = segments[segments.length - 1];
+    if (DECLARATION_RE.test(name)) {
+      // Committed build output would "use" the source it was built from, so build folders are left out.
+      if (!segments.slice(0, -1).some((s) => ALWAYS_SKIPPED_DIRS.has(s))) declarationFiles.push(rel);
+      continue;
+    }
     if (CONFIG_FILE_RE.test(rel)) configFiles.push(rel);
     else if (name === 'package.json') packageJsons.push(rel);
     else if (name.endsWith('.html')) htmlFiles.push(rel);
@@ -105,7 +113,7 @@ export function discoverFiles(root: string): Discovery {
       files.push({ abs: path.join(abs, ...segments), rel, role: fileRole(rel) });
     }
   }
-  return { files, packageJsons, htmlFiles, configFiles, docFiles };
+  return { files, packageJsons, htmlFiles, configFiles, docFiles, declarationFiles };
 }
 
 /** Files git tracks or would track under `root`, relative to it. Null outside a repository. */

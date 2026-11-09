@@ -28,6 +28,7 @@ export function File({ m, path }: { m: Model; path: string }) {
   const copies = P.copies(m, path).items.length;
   const cycle = m.cycleOf.get(i);
   const none = m.s.noImporters.find((x) => x.file === i);
+  const unusedHere = (m.s.unusedExports ?? []).filter((u) => u.file === i && !u.onlyTests).length;
   const solo = m.soloAuthor.get(i);
 
   return (
@@ -39,13 +40,23 @@ export function File({ m, path }: { m: Model; path: string }) {
         <h1 className="mono" style={{ fontSize: 22, overflowWrap: 'anywhere' }}>{f.path}</h1>
         <p style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           {f.role === 'test' && <span className="chip">test file</span>}
-          {f.entry && <span className="chip ok">entry point: {f.entry}</span>}
+          {f.entry && (
+            <span className="chip ok">
+              entry point: {f.entry}
+              {m.s.entryPoints.some((e) => e.file === path && e.typesOnly) ? ' (types only)' : ''}
+            </span>
+          )}
           {cycle !== undefined && (
             <span className="chip bad">
               <Proof of={() => P.cycleGroup(m, cycle)}>in a dependency cycle of {plural(m.s.cycleGroups[cycle].files.length, 'file')}</Proof>
             </span>
           )}
           {none && <span className="chip risk">{none.onlyTests ? 'only imported by tests' : 'nothing imports this file'}</span>}
+          {unusedHere > 0 && (
+            <span className="chip risk">
+              <Proof of={() => P.unusedExports(m, false, i)}>{plural(unusedHere, 'export')} no file imports</Proof>
+            </span>
+          )}
           {solo && <span className="chip" style={{ color: 'var(--people)' }}>only {solo} has changed it{m.inactive(solo) ? ', inactive 6+ months' : ''}</span>}
         </p>
       </div>

@@ -23,6 +23,48 @@ npm test
 - `packages/web`: the React UI. It reads one snapshot and works out the rest in the browser.
 - `packages/cli`: the `tsight` command.
 
+How a project becomes the numbers on screen. File names are in `packages/core/src`:
+
+```
+ project folder
+      |
+      v
+ discovery.ts       which files to read: git ls-files, or a walk that honours .gitignore
+      |
+      v
+ project.ts         parse each file (ts-morph). framework.ts pulls the code
+      |             out of .vue, .svelte and .astro files first
+      v
+ extract.ts         files, functions, classes, exports, and every import statement
+      |
+      v
+ resolve.ts         where each import points, the way TypeScript resolves it,
+      |             with tsconfig paths, workspaces and framework aliases
+      v
+ graph.ts           the import graph and its cycles
+ entry-points.ts    files loaded some other way: package.json, HTML, configs, conventions
+ issues.ts          files nothing imports
+ unused-exports.ts  exports nothing uses, following re-exports
+ complexity.ts, duplicates.ts, structural-twins.ts
+      |
+      v
+ analyzer.ts        runs the steps above and returns one AnalysisResult
+      |
+      +---- git.ts, behavior.ts   commits, authors, hotspots, files that change together
+      |
+      v
+ snapshot.ts        one JSON document (schema 1)
+      |
+      +----------------+-------------------+
+      v                v                   v
+ packages/api      packages/cli        packages/web
+ the server; runs  tsight analyze      the UI; reads the
+ the analysis in   prints it, tsight   snapshot from the
+ a worker thread   report embeds it    server or a report
+```
+
+`diff.ts` analyzes the base and the working copy separately and compares them. That is what `tsight diff`, the Changes page and the PR comment from `action.yml` show.
+
 ## Making a change
 
 1. Open an issue first for anything bigger than a small fix, so we can agree on the approach.

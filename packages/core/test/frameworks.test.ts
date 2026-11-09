@@ -112,12 +112,45 @@ describe('component files', () => {
       'composables/useX.ts': 'export const useX = () => 1;\n',
       'pages/index.vue': '<script setup>\nimport { helper } from "~/lib/helper";\n</script>\n',
       'lib/helper.ts': 'export const helper = 1;\n',
+      'shared/types/chat.ts': 'export interface Chat { id: string }\n',
+      'shared/utils/format.ts': 'export const format = () => 1;\n',
+      'shared/other/x.ts': 'export const x = 1;\n',
     });
+    expect(entries['shared/types/chat.ts']).toBe('Nuxt auto-import (no import statement to check)');
+    expect(entries['shared/utils/format.ts']).toBe('Nuxt auto-import (no import statement to check)');
+    expect(entries['shared/other/x.ts']).toBeUndefined();
     expect(entries['app.vue']).toBe('Nuxt app file');
     expect(entries['components/Hello.vue']).toBe('Nuxt auto-import (no import statement to check)');
     expect(entries['composables/useX.ts']).toBe('Nuxt auto-import (no import statement to check)');
     expect(entries['pages/index.vue']).toBe('Nuxt file convention');
     expect(entries['lib/helper.ts']).toBeUndefined();
+  });
+
+  it('matches exports patterns that name built files back to the source', async () => {
+    const { entries } = await analyze({
+      'package.json': JSON.stringify({ name: 'mono', private: true, workspaces: ['packages/*'] }),
+      // Compiled next to the source: "./*": "./*.js"
+      'packages/micro/package.json': JSON.stringify({ name: 'micro', exports: { '.': './index.js', './*': './*.js' } }),
+      'packages/micro/external/kafka.interface.ts': 'export interface Kafka { a: 1 }\n',
+      // Declarations under dist/types/<package>/ that mirror the packages folder.
+      'packages/app/package.json': JSON.stringify({ name: 'app', exports: { './*': { types: './dist/types/app/*.d.ts' }, './element/*': { types: './dist/types/element/src/*.d.ts' } } }),
+      'packages/app/components/Switch.tsx': 'export type SwitchProps = { on: boolean };\n',
+      'packages/element/src/types.ts': 'export type Bound = 1;\n',
+      'packages/other/src/x.ts': 'export const x = 1;\n',
+    });
+    expect(entries['packages/micro/external/kafka.interface.ts']).toBe('package.json "exports" pattern ./*.js');
+    expect(entries['packages/app/components/Switch.tsx']).toBe('package.json "exports" pattern ./dist/types/app/*.d.ts');
+    expect(entries['packages/element/src/types.ts']).toBe('package.json "exports" pattern ./dist/types/element/src/*.d.ts');
+    expect(entries['packages/other/src/x.ts']).toBeUndefined();
+  });
+
+  it('treats public-api.ts as the entry of an Angular library', async () => {
+    const { entries } = await analyze({
+      'package.json': JSON.stringify({ name: 'lib', peerDependencies: { '@angular/core': '^19.0.0' } }),
+      'src/public-api.ts': "export * from './button';\n",
+      'src/button.ts': 'export class Button {}\n',
+    });
+    expect(entries['src/public-api.ts']).toBe('Angular library public API (public-api.ts)');
   });
 
   it('resolves ~ in Nuxt to the project folder', async () => {

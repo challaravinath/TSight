@@ -49,19 +49,12 @@ export function cyclomaticComplexity(unit: ts.Node): number {
   return score;
 }
 
-const unitCache = new WeakMap<ts.Node, boolean>();
-
-/** Is this node a unit that gets its own score? */
+/**
+ * Is this node a unit that gets its own score? Cheap enough to work out each
+ * time: a cache keyed by node grew past what a WeakMap can hold on very large
+ * projects (tens of millions of nodes) and crashed the process.
+ */
 export function isUnit(node: ts.Node): boolean {
-  let v = unitCache.get(node);
-  if (v === undefined) {
-    v = computeIsUnit(node);
-    unitCache.set(node, v);
-  }
-  return v;
-}
-
-function computeIsUnit(node: ts.Node): boolean {
   switch (node.kind) {
     case ts.SyntaxKind.FunctionDeclaration:
     case ts.SyntaxKind.MethodDeclaration:

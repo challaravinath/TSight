@@ -7,7 +7,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import type { AnalysisResult, CodeIssue } from './types.js';
-import { discoverFiles, toPosix } from './internal/discovery.js';
+import { discoverFiles, fileRole, toPosix } from './internal/discovery.js';
 import { parseFiles } from './internal/project.js';
 import { ModuleResolver, realPath } from './internal/resolve.js';
 import {
@@ -17,6 +17,7 @@ import {
   extractInterfaces,
   extractImports,
   extractExports,
+  extractDeclarationImports,
   type Parsed,
 } from './internal/extract.js';
 import { collectUnits, calculateComplexity } from './internal/complexity.js';
@@ -26,6 +27,7 @@ import { buildMentalModel } from './internal/mental-model.js';
 import { findFilesWithoutImporters, findCircularDependencies, findComplexFunctions } from './internal/issues.js';
 import { findDuplicates } from './internal/duplicates.js';
 import { findStructuralTwins } from './internal/structural-twins.js';
+import { findUnusedExports } from './internal/unused-exports.js';
 import { calculateLanguages } from './internal/languages.js';
 import { calculateStats } from './internal/stats.js';
 
@@ -49,11 +51,12 @@ export async function analyzeProject(projectPath: string, options: AnalyzeOption
 
   const parsedRaw = parseFiles(discovery.files);
   const parsed: Parsed[] = parsedRaw.map(({ sf, file }) => ({ sf, rel: file.rel, role: file.role }));
+  log(`Parsed ${parsed.length} files`);
 
   const files = extractFiles(parsed);
   const folders = extractFolders(files);
   const languages = calculateLanguages(files);
-  const { exportsByFile, exportLines, exportedLocalNames } = extractExports(parsed);
+  const { exportsByFile, exportLines, exportedLocalNames, typeExports } = extractExports(parsed);
   const classes = extractClasses(parsed, exportedLocalNames);
   const interfaces = extractInterfaces(parsed, exportedLocalNames);
 
@@ -76,13 +79,21 @@ export async function analyzeProject(projectPath: string, options: AnalyzeOption
     return res.kind === 'internal' && res.target ? toPosix(path.relative(root, res.target)) : null;
   };
   const entryPoints = findEntryPoints(root, files, packageJsons, discovery.htmlFiles, discovery.configFiles, discovery.docFiles, importTarget);
+  // Hand-written .d.ts files are not analyzed, but what they import from the code is used.
+  // Those in test folders count like tests do, so they are left out here.
+  const declarationImports = extractDeclarationImports(root, discovery.declarationFiles.filter((f) => fileRole(f) !== 'test'), resolver);
+  const usedByDeclarations = new Set(declarationImports.map((i) => i.to));
 
   const issues: CodeIssue[] = [
     ...findCircularDependencies(dependencyGraph),
     ...findComplexFunctions(functions, files),
-    ...findFilesWithoutImporters(files, dependencyGraph, entryPoints, resolution),
+    ...findFilesWithoutImporters(files, dependencyGraph, entryPoints, resolution, usedByDeclarations),
   ];
+  const listedFiles = new Set(issues.filter((i) => i.type === 'dead-code').map((i) => i.file));
+  const exportsReport = findUnusedExports(files, [...imports, ...declarationImports], exportsByFile, exportLines, typeExports, entryPoints, listedFiles);
+  log(`Found ${entryPoints.length} entry points and ${exportsReport.unused.length} unused exports`);
   const duplicates = findDuplicates(parsed);
+  log(`Found ${duplicates.length} duplicated blocks`);
   const twinReport = findStructuralTwins(units);
   const sourceFiles = new Set(files.filter((f) => f.role === 'source').map((f) => f.path));
   const complexity = calculateComplexity(functions.filter((f) => sourceFiles.has(f.file)));
@@ -109,6 +120,8 @@ export async function analyzeProject(projectPath: string, options: AnalyzeOption
     entryPoints,
     exportsByFile,
     exportLines,
+    unusedExports: exportsReport.unused,
+    exportStats: { totalExports: exportsReport.totalExports, filesUsedAsAWhole: exportsReport.filesUsedAsAWhole },
     mentalModel,
     issues,
     duplicates,

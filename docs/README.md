@@ -68,7 +68,7 @@ The report is a single file with the UI and the data inside it. It opens offline
 
 ## How each number is worked out
 
-**Imports.** Resolved the way the TypeScript compiler resolves them, with the nearest `tsconfig.json` for each file, including project references. That covers path aliases, `./file.js` written for ESM, re-exports, `import()`, `require()` and Vite's `import.meta.glob`. Workspace packages in a monorepo are matched to their source folders. The bar under the header says how many project imports resolved. Click the unresolved count to see the ones that didn't, because those links are missing from everything below.
+**Imports.** Resolved the way the TypeScript compiler resolves them, with the nearest `tsconfig.json` for each file, including project references. That covers path aliases, `./file.js` written for ESM, re-exports, `import()`, `require()` and Vite's `import.meta.glob`. In `.vue`, `.svelte` and `.astro` files the imports in `<script>` blocks and Astro frontmatter count; imports used only in a template are not seen. Workspace packages in a monorepo are matched to their source folders. `#name` imports follow the `imports` field of the nearest package.json. An import of a `dist/` folder that hasn't been built counts as an import of the matching file under `src/` or `src/lib/`, when that file exists. The bar under the header says how many project imports resolved. Click the unresolved count to see the ones that didn't, because those links are missing from everything below.
 
 **Dependents and reach.** Dependents are the files that import a file directly, tests included. Reach follows imports backwards until nothing new turns up.
 
@@ -86,7 +86,22 @@ The report is a single file with the UI and the data inside it. It opens offline
 
 **Files nothing imports.** Source files that no file imports and no entry-point rule covers. TSight says "nothing imports" rather than "unused", because a file can still be loaded in a way it can't see.
 
-**Entry points.** Files started by something other than an import: `package.json` (`main`, `exports`, `bin`, scripts), HTML `<script>` tags, `wrangler` config, test setup files, GitHub workflows, files in `public/`, Next.js conventions, tool config files and tests. If your project loads files some other way, list them in `tsight.config.json` at the project root:
+**Unused exports.** Exports that no file in the project imports. Code outside the project, such as the users of a published package, and names a tool or framework loads without an import statement can't be seen, so check before you delete. Files loaded that way can be listed under `entryPoints` in `tsight.config.json`. A use is followed through files that re-export it, `export *` included, to the file that declares the name. `import('./x').Type` in a type or a JSDoc comment uses `Type`, and imports in hand-written `.d.ts` files count too, though those files aren't analyzed themselves. Some imports can use any export of a file, so they count as using all of them: `import * as ns`, `import()`, `require()` and `import.meta.glob`. Entry points are what the outside world loads, so their exports, and everything they re-export, count as used. Exports only tests use are listed separately. Files nothing imports are not repeated here, and neither are `.vue`, `.svelte` and `.astro` files, whose `export` lines are mostly component props. An export used only inside its own file is listed too, since it works without the `export`.
+
+**Entry points.** Files started by something other than an import:
+
+- `package.json`: `main`, `module`, `exports` (including `*` patterns, matched back to the source when they name built files), `bin` and scripts
+- `public-api.ts` in Angular libraries
+- HTML `<script>` tags, and imports in inline `<script type="module">` blocks
+- imports in MDX pages and in `<script>` blocks of Markdown pages (VitePress, mdsvex)
+- paths named in tool configs, such as a Nuxt module or a Playwright reporter
+- `angular.json` (`main`, `browser`, `server`, `polyfills`, `ssr.entry`)
+- framework conventions: Next.js, SvelteKit, Nuxt, Astro and Remix routes and special files, and the folders Vue Router file routing, unplugin-vue-components and unplugin-auto-import load
+- `wrangler` config, test setup files, benchmark files, GitHub workflows, files in `public/`, tool config files and tests
+
+Nuxt and the unplugin plugins import some folders automatically, with no import statement to check. Files there count as used, and the reason says so.
+
+If your project loads files some other way, list them in `tsight.config.json` at the project root:
 
 ```json
 {

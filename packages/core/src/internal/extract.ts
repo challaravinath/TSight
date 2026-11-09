@@ -1,4 +1,5 @@
 import { SourceFile, Node, SyntaxKind, ts } from 'ts-morph';
+import * as fs from 'fs';
 import * as path from 'path';
 import type {
   FileInfo,
@@ -173,10 +174,13 @@ export function extractExports(parsed: Parsed[]): {
   exportsByFile: Record<string, string[]>;
   exportLines: Record<string, Record<string, number>>;
   exportedLocalNames: Map<string, Set<string>>;
+  /** Exports that are only types: interfaces, type aliases and `export type { }`. */
+  typeExports: Record<string, string[]>;
 } {
   const exportsByFile: Record<string, string[]> = {};
   const exportLines: Record<string, Record<string, number>> = {};
   const exportedLocalNames = new Map<string, Set<string>>();
+  const typeExports: Record<string, string[]> = {};
 
   for (const { sf: wrapped, rel } of parsed) {
     const sf = wrapped.compilerNode;
@@ -184,6 +188,8 @@ export function extractExports(parsed: Parsed[]): {
     const lines: Record<string, number> = {};
     const locals = new Set<string>();
     const topLevel = new Map<string, number>(); // local declaration name -> line
+    const typeOnlyLocal = new Set<string>(); // interfaces and type aliases declared in this file
+    const types = new Set<string>();
 
     const bindingNames = (name: ts.BindingName): string[] => {
       if (ts.isIdentifier(name)) return [name.text];
@@ -202,7 +208,10 @@ export function extractExports(parsed: Parsed[]): {
     };
     const mods = (st: ts.Statement) => (ts.canHaveModifiers(st) ? ts.getModifiers(st) ?? [] : []);
 
-    for (const st of sf.statements) for (const n of declaredNames(st)) if (!topLevel.has(n)) topLevel.set(n, lineOf(st));
+    for (const st of sf.statements) {
+      for (const n of declaredNames(st)) if (!topLevel.has(n)) topLevel.set(n, lineOf(st));
+      if ((ts.isInterfaceDeclaration(st) || ts.isTypeAliasDeclaration(st)) && ts.isIdentifier(st.name)) typeOnlyLocal.add(st.name.text);
+    }
 
     for (const st of sf.statements) {
       const m = mods(st);
@@ -219,6 +228,7 @@ export function extractExports(parsed: Parsed[]): {
           for (const n of names) {
             lines[n] = lineOf(st);
             locals.add(n);
+            if (ts.isInterfaceDeclaration(st) || ts.isTypeAliasDeclaration(st)) types.add(n);
           }
         }
       } else if (ts.isExportAssignment(st)) {
@@ -229,6 +239,7 @@ export function extractExports(parsed: Parsed[]): {
           const local = (el.propertyName ?? el.name).text;
           lines[el.name.text] = topLevel.get(local) ?? lineOf(st);
           locals.add(local);
+          if (st.isTypeOnly || el.isTypeOnly || typeOnlyLocal.has(local)) types.add(el.name.text);
         }
       }
     }
@@ -237,8 +248,9 @@ export function extractExports(parsed: Parsed[]): {
     exportsByFile[rel] = Object.keys(lines).sort();
     exportLines[rel] = lines;
     exportedLocalNames.set(rel, locals);
+    if (types.size > 0) typeExports[rel] = Array.from(types).sort();
   }
-  return { exportsByFile, exportLines, exportedLocalNames };
+  return { exportsByFile, exportLines, exportedLocalNames, typeExports };
 }
 
 interface RawImport {
@@ -246,8 +258,95 @@ interface RawImport {
   syntax: ImportSyntax;
   typeOnly: boolean;
   names: string[];
+  exportedAs?: string[];
   line: number;
   eager?: boolean; // import.meta.glob(..., { eager: true })
+}
+
+/**
+ * import('x') in a type position. `import('./a').Config` uses Config;
+ * `typeof import('./a')` with nothing after it uses the whole module.
+ */
+function importTypeRaw(node: ts.Node, sf: ts.SourceFile): RawImport | null {
+  if (!ts.isImportTypeNode(node) || !ts.isLiteralTypeNode(node.argument) || !ts.isStringLiteral(node.argument.literal)) return null;
+  let first: ts.EntityName | undefined = node.qualifier;
+  while (first && ts.isQualifiedName(first)) first = first.left;
+  return {
+    specifier: node.argument.literal.text,
+    syntax: 'dynamic',
+    typeOnly: true,
+    names: first ? [first.text] : ['*'],
+    line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+  };
+}
+
+/**
+ * Imports in a hand-written declaration file, read from the syntax tree
+ * alone, including those inside `declare module '...' { }` blocks.
+ */
+function collectDeclarationImports(sf: ts.SourceFile): RawImport[] {
+  const out: RawImport[] = [];
+  const lineOf = (node: ts.Node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      const clause = node.importClause;
+      const names: string[] = [];
+      if (clause?.name) names.push('default');
+      if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings)) names.push('*');
+      if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+        for (const el of clause.namedBindings.elements) names.push((el.propertyName ?? el.name).text);
+      }
+      out.push({ specifier: node.moduleSpecifier.text, syntax: 'import', typeOnly: true, names: names.length ? names : ['*'], line: lineOf(node) });
+    } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      // Passing names on from a .d.ts is a use: nothing else in the project reads this file.
+      const named = node.exportClause && ts.isNamedExports(node.exportClause) ? node.exportClause.elements.map((el) => (el.propertyName ?? el.name).text) : ['*'];
+      out.push({ specifier: node.moduleSpecifier.text, syntax: 'import', typeOnly: true, names: named, line: lineOf(node) });
+    } else {
+      const typeImport = importTypeRaw(node, sf);
+      if (typeImport) out.push(typeImport);
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sf, visit);
+  return out;
+}
+
+/**
+ * Uses of project files from hand-written declaration files. A .d.ts is not
+ * analyzed as code, but it can use what the code exports, for example
+ * `declare module 'virtual:config' { const c: import('./src/config.js').Config }`.
+ * Only imports that resolve to an analyzed file are returned.
+ */
+export function extractDeclarationImports(root: string, declarationFiles: string[], resolver: ModuleResolver): ImportInfo[] {
+  const rootAbs = path.resolve(root);
+  const out: ImportInfo[] = [];
+  for (const rel of declarationFiles) {
+    const abs = path.join(rootAbs, rel);
+    let text: string;
+    try {
+      text = fs.readFileSync(abs, 'utf8');
+    } catch {
+      continue;
+    }
+    const sf = ts.createSourceFile(abs, text, ts.ScriptTarget.Latest, false);
+    for (const raw of collectDeclarationImports(sf)) {
+      const res = resolver.resolve(raw.specifier, abs);
+      if (res.kind !== 'internal' || !res.target) continue;
+      out.push({
+        from: rel,
+        to: toPosix(path.relative(rootAbs, res.target)),
+        specifier: raw.specifier,
+        kind: 'internal',
+        syntax: raw.syntax,
+        typeOnly: true,
+        imports: raw.names,
+        isExternal: false,
+        line: raw.line,
+        resolvedBy: res.resolvedBy,
+      });
+    }
+  }
+  return out;
 }
 
 function collectRawImports(sf: SourceFile): RawImport[] {
@@ -272,11 +371,14 @@ function collectRawImports(sf: SourceFile): RawImport[] {
     if (!spec) continue;
     const namedNodes = exp.getNamedExports();
     const named = namedNodes.map((n) => n.getName());
+    const namespace = exp.getNamespaceExport()?.getName();
     out.push({
       specifier: spec,
       syntax: 'export',
       typeOnly: exp.isTypeOnly() || (namedNodes.length > 0 && namedNodes.every((n) => n.isTypeOnly())),
       names: named.length > 0 ? named : ['*'],
+      // export { a as b } from: a is exported as b. export * as ns from: everything as ns.
+      exportedAs: namespace ? [namespace] : named.length > 0 ? namedNodes.map((n) => n.getAliasNode()?.getText() ?? n.getName()) : undefined,
       line: exp.getStartLineNumber(),
     });
   }
@@ -341,16 +443,11 @@ function collectRawImports(sf: SourceFile): RawImport[] {
         }
       }
     }
-    // import('x') inside a type position, e.g. typeof import('./a')
-    if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument) && ts.isStringLiteral(node.argument.literal)) {
-      out.push({
-        specifier: node.argument.literal.text,
-        syntax: 'dynamic',
-        typeOnly: true,
-        names: ['*'],
-        line: raw.getLineAndCharacterOfPosition(node.getStart(raw)).line + 1,
-      });
-    }
+    const typeImport = importTypeRaw(node, raw);
+    if (typeImport) out.push(typeImport);
+    // JSDoc types in JavaScript: /** @type {import('./a').Config} */
+    const docs = (node as { jsDoc?: ts.JSDoc[] }).jsDoc;
+    if (docs) for (const doc of docs) ts.forEachChild(doc, visit);
     ts.forEachChild(node, visit);
   };
   ts.forEachChild(raw, visit);
@@ -411,6 +508,7 @@ export function extractImports(root: string, parsed: Parsed[], resolver: ModuleR
         syntax: raw.syntax,
         typeOnly: raw.typeOnly,
         imports: raw.names,
+        ...(raw.exportedAs ? { exportedAs: raw.exportedAs } : {}),
         isExternal: res.kind === 'external',
         line: raw.line,
         resolvedBy: res.resolvedBy,

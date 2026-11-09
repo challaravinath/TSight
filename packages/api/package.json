@@ -1,6 +1,6 @@
 {
   "name": "@tsight/api",
-  "version": "3.0.3",
+  "version": "3.1.0",
   "description": "TSight server: serves the web UI and runs the analysis in a worker thread",
   "main": "dist/index.js",
   "type": "module",
