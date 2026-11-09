@@ -29,7 +29,6 @@ npm test
 2. If you change how a number is calculated, add a test that shows the case your change fixes.
 3. If the UI shows a new number, it needs a list behind it that the reader can open.
 4. Run `npm run build`, `npm run typecheck` and `npm test` before you open the pull request.
-5. To check the numbers against real projects, run `TSIGHT_CORPUS=1 npm test`. It clones about 150 MB the first time.
 
 ## Writing
 

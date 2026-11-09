@@ -133,7 +133,7 @@ export interface ImportInfo {
   imports: string[]; // imported names; 'default' for a default import, '*' for namespace, star or dynamic
   isExternal: boolean; // kept for older consumers: true when kind is 'external'
   line: number;
-  resolvedBy?: 'typescript' | 'workspace' | 'glob'; // how an internal target was found
+  resolvedBy?: 'typescript' | 'workspace' | 'glob' | 'framework'; // how an internal target was found
   lazy?: boolean; // loaded on demand (a non-eager import.meta.glob)
 }
 

@@ -3,6 +3,7 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import type { DuplicateGroup } from '../types.js';
 import type { Parsed } from './extract.js';
+import { isComponentFile } from './framework.js';
 
 /** Files shorter than this many tokens are ignored (tiny barrels and stubs are often identical on purpose). */
 export const MIN_DUPLICATE_TOKENS = 40;
@@ -18,6 +19,9 @@ export function findDuplicates(parsed: Parsed[]): DuplicateGroup[] {
   const byTokens = new Map<string, Array<{ rel: string; bytes: string }>>();
 
   for (const { sf, rel } of parsed) {
+    // Only the script of a component is parsed, so two components with the same script
+    // but different templates would look identical. They are left out.
+    if (isComponentFile(rel)) continue;
     const text = sf.getFullText();
     const tokens = tokenize(sf.compilerNode);
     if (tokens.length < MIN_DUPLICATE_TOKENS) continue;

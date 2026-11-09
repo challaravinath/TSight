@@ -15,7 +15,7 @@ import { analyzeProject } from './analyzer.js';
 import { readGitHistory, shallowBoundary, type GitCommit } from './git.js';
 import { coChanges } from './behavior.js';
 import { reverseEdges } from './internal/graph.js';
-import { CODE_EXTENSIONS } from './internal/discovery.js';
+import { isAnalyzedFile } from './internal/discovery.js';
 
 export interface DiffFile {
   path: string;
@@ -63,7 +63,7 @@ function git(cwd: string, args: string[]): Promise<string> {
   });
 }
 
-const isCode = (p: string) => CODE_EXTENSIONS.includes(path.extname(p).toLowerCase()) && !/\.d\.[cm]?ts$/i.test(p);
+const isCode = (p: string) => isAnalyzedFile(path.posix.basename(p));
 
 export async function analyzeDiff(
   projectPath: string,
