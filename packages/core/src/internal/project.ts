@@ -1,5 +1,7 @@
+import * as fs from 'fs';
 import { Project, SourceFile, ts } from 'ts-morph';
 import type { DiscoveredFile } from './discovery.js';
+import { componentScript, isComponentFile } from './framework.js';
 
 /**
  * A fresh ts-morph Project for one analysis run. Only parsing is used here
@@ -23,7 +25,13 @@ export function parseFiles(files: DiscoveredFile[]): Array<{ sf: SourceFile; fil
   const out: Array<{ sf: SourceFile; file: DiscoveredFile }> = [];
   for (const file of files) {
     try {
-      out.push({ sf: project.addSourceFileAtPath(file.abs), file });
+      if (isComponentFile(file.rel)) {
+        // Parse only the <script> blocks; the file keeps its own path, length and line numbers.
+        const { text, scriptKind } = componentScript(file.rel, fs.readFileSync(file.abs, 'utf8'));
+        out.push({ sf: project.createSourceFile(file.abs, text, { scriptKind, overwrite: true }), file });
+      } else {
+        out.push({ sf: project.addSourceFileAtPath(file.abs), file });
+      }
     } catch {
       // Unreadable file: skipped and counted by the caller.
     }

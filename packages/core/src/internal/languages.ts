@@ -9,6 +9,9 @@ const LANGUAGES: Record<string, { name: string; color: string }> = {
   '.mjs': { name: 'JavaScript', color: '#f7df1e' },
   '.cjs': { name: 'JavaScript', color: '#f7df1e' },
   '.jsx': { name: 'JavaScript JSX', color: '#e8c72a' },
+  '.vue': { name: 'Vue', color: '#41b883' },
+  '.svelte': { name: 'Svelte', color: '#ff3e00' },
+  '.astro': { name: 'Astro', color: '#bc52ee' },
 };
 
 /** Share of lines by language, source files only. */

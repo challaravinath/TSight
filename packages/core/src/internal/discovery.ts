@@ -3,8 +3,16 @@ import * as path from 'path';
 import { execFileSync } from 'child_process';
 import ignore, { type Ignore } from 'ignore';
 import type { FileRole } from '../types.js';
+import { COMPONENT_EXTENSIONS } from './framework.js';
 
 export const CODE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
+
+/** Every file the analysis reads: code files plus .vue, .svelte and .astro components. */
+export function isAnalyzedFile(name: string): boolean {
+  if (DECLARATION_RE.test(name)) return false;
+  const ext = path.extname(name).toLowerCase();
+  return CODE_EXTENSIONS.includes(ext) || COMPONENT_EXTENSIONS.includes(ext);
+}
 
 // Never source, even when committed.
 const NEVER_SOURCE_DIRS = new Set(['node_modules', '.git', '.hg', '.svn']);
@@ -40,11 +48,12 @@ export interface Discovery {
   files: DiscoveredFile[];
   packageJsons: string[]; // relative paths of every package.json seen
   htmlFiles: string[]; // relative paths of .html files, for <script src> entry points
-  /** Other files that can name entry points: wrangler configs, GitHub workflows, tsight.config.json. */
+  docFiles: string[]; // relative paths of .md and .mdx files, whose import lines can load components
+  /** Other files that can name entry points: wrangler configs, angular.json, GitHub workflows, tsight.config.json. */
   configFiles: string[];
 }
 
-const CONFIG_FILE_RE = /(^|\/)(wrangler\.(toml|json|jsonc)|tsight\.config\.json)$|^\.github\/workflows\/[^/]+\.ya?ml$/;
+const CONFIG_FILE_RE = /(^|\/)(wrangler\.(toml|json|jsonc)|tsight\.config\.json|angular\.json)$|^\.github\/workflows\/[^/]+\.ya?ml$/;
 
 export function toPosix(p: string): string {
   return p.split(path.sep).join('/');
@@ -83,6 +92,7 @@ export function discoverFiles(root: string): Discovery {
   const packageJsons: string[] = [];
   const htmlFiles: string[] = [];
   const configFiles: string[] = [];
+  const docFiles: string[] = [];
   for (const rel of rels) {
     const segments = rel.split('/');
     if (segments.slice(0, -1).some((s) => NEVER_SOURCE_DIRS.has(s))) continue;
@@ -90,11 +100,12 @@ export function discoverFiles(root: string): Discovery {
     if (CONFIG_FILE_RE.test(rel)) configFiles.push(rel);
     else if (name === 'package.json') packageJsons.push(rel);
     else if (name.endsWith('.html')) htmlFiles.push(rel);
-    else if (!DECLARATION_RE.test(name) && CODE_EXTENSIONS.includes(path.extname(name).toLowerCase())) {
+    else if (/\.mdx?$/i.test(name)) docFiles.push(rel);
+    else if (isAnalyzedFile(name)) {
       files.push({ abs: path.join(abs, ...segments), rel, role: fileRole(rel) });
     }
   }
-  return { files, packageJsons, htmlFiles, configFiles };
+  return { files, packageJsons, htmlFiles, configFiles, docFiles };
 }
 
 /** Files git tracks or would track under `root`, relative to it. Null outside a repository. */

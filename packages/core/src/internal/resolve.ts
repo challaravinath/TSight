@@ -4,6 +4,7 @@ import { builtinModules } from 'module';
 import { ts } from 'ts-morph';
 import type { ImportKind } from '../types.js';
 import { toPosix, CODE_EXTENSIONS } from './discovery.js';
+import { COMPONENT_EXTENSIONS } from './framework.js';
 
 const ASSET_EXTENSIONS = new Set([
   '.css', '.scss', '.sass', '.less', '.styl', '.pcss',
@@ -12,7 +13,6 @@ const ASSET_EXTENSIONS = new Set([
   '.mp3', '.mp4', '.webm', '.wav', '.ogg',
   '.json', '.json5', '.md', '.mdx', '.html', '.txt', '.csv', '.yaml', '.yml', '.toml',
   '.graphql', '.gql', '.wasm', '.glsl', '.vert', '.frag',
-  '.vue', '.svelte', '.astro',
 ]);
 
 const BUILTINS = new Set(builtinModules);
@@ -20,7 +20,7 @@ const BUILTINS = new Set(builtinModules);
 export interface Resolution {
   kind: ImportKind;
   target?: string; // absolute path, when a file was found
-  resolvedBy?: 'typescript' | 'workspace';
+  resolvedBy?: 'typescript' | 'workspace' | 'framework';
 }
 
 interface ConfigEntry {
@@ -32,8 +32,11 @@ interface ConfigEntry {
   references: string[]; // absolute paths of referenced tsconfig files
 }
 
+/** Modules Nuxt generates at build time. */
+const NUXT_VIRTUAL = /^#(imports|components|app|build|vue-router|internal)(\/|$)/;
+
 /** Specifiers that can never be npm package names, so they must be project aliases. */
-const ALIAS_LIKE = /^(@\/|~\/|~$|#)/;
+const ALIAS_LIKE = /^(@\/|~\/|~$|#|\$lib(\/|$))/;
 
 /** Resolve symlinks so paths compare equal however the folder was reached. */
 export function realPath(p: string): string {
@@ -104,6 +107,7 @@ export class ModuleResolver {
     const isBare = !isRelative;
 
     const config = this.configFor(fromAbs);
+    if (COMPONENT_EXTENSIONS.includes(ext)) return this.resolveComponent(cleanSpec, fromAbs, config);
     const result = ts.resolveModuleName(cleanSpec, fromAbs, config.options, this.host, config.cache);
     const resolved = result.resolvedModule;
 
@@ -128,9 +132,15 @@ export class ModuleResolver {
     if (isBare) {
       const ws = this.resolveWorkspace(cleanSpec);
       if (ws) return { kind: 'internal', target: ws, resolvedBy: 'workspace' };
+      const fw = this.resolveFrameworkAlias(cleanSpec, fromAbs);
+      if (fw) return { kind: 'internal', target: fw, resolvedBy: 'framework' };
     }
+    // SvelteKit writes ./$types for every route while it builds; it is not in the repository.
+    if (/^\.\/\$types(\.js)?$/.test(cleanSpec) && this.configDir(path.dirname(fromAbs), /^svelte\.config\.[cm]?[jt]s$/)) return { kind: 'external' };
     if (isRelative) return { kind: 'unresolved' };
     if (cleanSpec.startsWith('node:') || BUILTINS.has(cleanSpec.split('/')[0])) return { kind: 'external' };
+    // Modules Nuxt generates at build time (#imports, #components, #app, ...): they come from the nuxt package, not the project.
+    if (NUXT_VIRTUAL.test(cleanSpec) && this.configDir(path.dirname(fromAbs), /^nuxt\.config\.[cm]?[jt]s$/)) return { kind: 'external' };
     if (
       ALIAS_LIKE.test(cleanSpec) ||
       this.matchesPathAlias(cleanSpec, config) ||
@@ -140,6 +150,87 @@ export class ModuleResolver {
     }
     // A bare specifier that is not an alias: a package, installed or not.
     return { kind: 'external' };
+  }
+
+  /**
+   * `./Button.vue`, `@/components/Button.vue`, `$lib/Card.svelte`. TypeScript
+   * cannot load these files, so it is asked for `Button.vue.ts` instead, with a
+   * file system where that name exists whenever `Button.vue` was analyzed. That
+   * way tsconfig `paths` and `baseUrl` apply exactly as they do to other imports.
+   */
+  private resolveComponent(spec: string, fromAbs: string, config: ConfigEntry): Resolution {
+    const isRelative = spec.startsWith('.') || path.isAbsolute(spec);
+    const asComponent = (p: string): string | null => {
+      if (!p.endsWith('.ts')) return null;
+      const real = realPath(path.resolve(p.slice(0, -3)));
+      return this.analyzed.has(real) ? real : null;
+    };
+    const host: ts.ModuleResolutionHost = {
+      ...this.host,
+      fileExists: (p) => asComponent(p) !== null,
+    };
+    const resolved = ts.resolveModuleName(spec, fromAbs, { ...config.options, allowJs: false }, host).resolvedModule;
+    const target = resolved ? asComponent(resolved.resolvedFileName) : null;
+    if (target) return { kind: 'internal', target, resolvedBy: 'typescript' };
+    // './test.astro' can also name a code file called test.astro.js.
+    const plain = ts.resolveModuleName(spec, fromAbs, config.options, this.host, config.cache).resolvedModule;
+    if (plain) {
+      const real = realPath(path.resolve(plain.resolvedFileName));
+      if (this.classifyTarget(real) === 'internal') return { kind: 'internal', target: real, resolvedBy: 'typescript' };
+    }
+    if (!isRelative) {
+      const ws = this.resolveWorkspace(spec);
+      if (ws) return { kind: 'internal', target: ws, resolvedBy: 'workspace' };
+      const fw = this.resolveFrameworkAlias(spec, fromAbs);
+      if (fw) return { kind: 'internal', target: fw, resolvedBy: 'framework' };
+      if (!ALIAS_LIKE.test(spec) && !this.matchesPathAlias(spec, config) && !this.matchesWorkspaceName(spec)) {
+        return { kind: 'external' };
+      }
+    }
+    return { kind: 'unresolved' };
+  }
+
+  /**
+   * Aliases a framework sets up in a tsconfig it generates at build time
+   * (.svelte-kit/tsconfig.json, .nuxt/tsconfig.json). A fresh clone has no such
+   * file, so the framework's documented defaults are used, and only when the
+   * framework's config file is present:
+   * - SvelteKit: `$lib` is `src/lib` next to svelte.config.*
+   * - Nuxt: `~` and `@` are the folder of nuxt.config.*, or its `app/` folder
+   * The import counts only if a file is found there.
+   */
+  private resolveFrameworkAlias(spec: string, fromAbs: string): string | null {
+    const lookFor = (configName: RegExp, bases: (dir: string) => string[], sub: string): string | null => {
+      const dir = this.configDir(path.dirname(fromAbs), configName);
+      if (!dir) return null;
+      for (const base of bases(dir)) {
+        for (const c of [realPath(path.resolve(base, sub)), ...withExtensions(path.join(base, sub)), ...withExtensions(path.join(base, sub, 'index'))]) {
+          if (this.analyzed.has(c)) return c;
+        }
+      }
+      return null;
+    };
+    const lib = spec.match(/^\$lib(?:\/(.*))?$/);
+    if (lib) return lookFor(/^svelte\.config\.[cm]?[jt]s$/, (d) => [path.join(d, 'src', 'lib')], lib[1] ?? 'index');
+    const nuxt = spec.match(/^[~@]\/(.+)$/);
+    if (nuxt) return lookFor(/^nuxt\.config\.[cm]?[jt]s$/, (d) => [d, path.join(d, 'app')], nuxt[1]);
+    // Nuxt 4: #shared is the shared/ folder next to nuxt.config.
+    const shared = spec.match(/^#shared(?:\/(.*))?$/);
+    if (shared) return lookFor(/^nuxt\.config\.[cm]?[jt]s$/, (d) => [path.join(d, 'shared')], shared[1] ?? 'index');
+    return null;
+  }
+
+  private readonly configDirs = new Map<string, string | null>();
+
+  /** findConfigDir, remembered per folder: the same folders come up for every import in them. */
+  private configDir(startDir: string, name: RegExp): string | null {
+    const key = `${name.source}|${startDir}`;
+    let dir = this.configDirs.get(key);
+    if (dir === undefined) {
+      dir = findConfigDir(startDir, this.root, name);
+      this.configDirs.set(key, dir);
+    }
+    return dir;
   }
 
   /** For a .d.ts or an unanalyzed .js, the analyzed source file with the same name, if any. */
@@ -258,6 +349,10 @@ export class ModuleResolver {
         candidates.push(...withExtensions(path.join(dir, 'src', 'index')));
         candidates.push(...withExtensions(path.join(dir, 'index')));
       } else {
+        // pkg/Button.svelte: a component file named with its extension.
+        if (COMPONENT_EXTENSIONS.includes(path.extname(sub).toLowerCase())) {
+          candidates.push(realPath(path.join(dir, 'src', sub)), realPath(path.join(dir, sub)));
+        }
         candidates.push(...withExtensions(path.join(dir, 'src', sub)));
         candidates.push(...withExtensions(path.join(dir, 'src', sub, 'index')));
         candidates.push(...withExtensions(path.join(dir, sub)));
@@ -268,6 +363,22 @@ export class ModuleResolver {
       }
     }
     return null;
+  }
+}
+
+/** The nearest folder from startDir up to root that holds a file matching name. */
+function findConfigDir(startDir: string, root: string, name: RegExp): string | null {
+  let dir = startDir;
+  for (;;) {
+    try {
+      if (fs.readdirSync(dir).some((f) => name.test(f))) return dir;
+    } catch {
+      // unreadable folder: keep going up
+    }
+    if (dir === root) return null;
+    const parent = path.dirname(dir);
+    if (parent === dir || path.relative(root, parent).startsWith('..')) return null;
+    dir = parent;
   }
 }
 

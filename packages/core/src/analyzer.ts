@@ -71,7 +71,11 @@ export async function analyzeProject(projectPath: string, options: AnalyzeOption
   const externalPackages = extractExternalPackages(imports);
 
   const packageJsons = [...discovery.packageJsons, ...packageJsonsAbove(root)];
-  const entryPoints = findEntryPoints(root, files, packageJsons, discovery.htmlFiles, discovery.configFiles);
+  const importTarget = (specifier: string, fromRel: string): string | null => {
+    const res = resolver.resolve(specifier, path.join(root, fromRel));
+    return res.kind === 'internal' && res.target ? toPosix(path.relative(root, res.target)) : null;
+  };
+  const entryPoints = findEntryPoints(root, files, packageJsons, discovery.htmlFiles, discovery.configFiles, discovery.docFiles, importTarget);
 
   const issues: CodeIssue[] = [
     ...findCircularDependencies(dependencyGraph),
