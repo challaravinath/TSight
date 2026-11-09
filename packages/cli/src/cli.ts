@@ -95,8 +95,14 @@ function buildReport(snapshot: Snapshot, diff: DiffReport | null): string {
     return `<style>${css}</style>`;
   });
   const data = `<script>window.__TSIGHT_SNAPSHOT__=${safe(snapshot)};window.__TSIGHT_DIFF__=${safe(diff)};</script>`;
+  // The report carries TSight's code and the bundled libraries and fonts, so their licenses go in with it.
+  const licenses = [path.join(here, '../LICENSE'), path.join(dir, 'THIRD-PARTY-NOTICES.txt')]
+    .filter((f) => fs.existsSync(f))
+    .map((f) => fs.readFileSync(f, 'utf8').trim())
+    .join('\n\n');
+  const notice = licenses ? `<!--\nTSight\n\n${licenses.replace(/-->/g, '- ->')}\n-->\n` : '';
   // A function, so that $ sequences in the data are not read as replacement patterns.
-  return html.replace('</head>', () => `${data}\n</head>`);
+  return html.replace('</head>', () => `${notice}${data}\n</head>`);
 }
 
 async function main() {

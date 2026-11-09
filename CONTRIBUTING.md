@@ -45,7 +45,7 @@ Every pull request gets a comment from TSight itself, showing what the change to
 2. Tag the merge on `main` and push the tag: `git tag v3.1.0` then `git push origin v3.1.0`.
 3. The release workflow runs the tests and creates the GitHub release, with a sample report attached.
 
-TSight isn't published to npm.
+`tsight`, `@tsight/core` and `@tsight/api` are on npm. The release workflow doesn't publish them.
 
 ### Testing the release process
 

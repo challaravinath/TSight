@@ -51,6 +51,16 @@ describe.skipIf(!built)('tsight command', () => {
     expect(html).not.toMatch(/(src|href)=["']https?:/); // nothing loads from the network
   });
 
+  it('report includes the licenses of TSight and what the UI bundles', () => {
+    const dir = project({ 'src/a.ts': 'export const a = 1;\n' });
+    const out = path.join(dir, 'report.html');
+    expect(run(dir, 'report', '.', '--out', out).status).toBe(0);
+    const html = fs.readFileSync(out, 'utf8');
+    expect(html).toContain('Copyright (c) 2025-2026 Challa Ravindranath');
+    expect(html).toContain('react-dom');
+    expect(html).toContain('SIL Open Font License');
+  });
+
   it('report keeps $ sequences in the data as they are', () => {
     const dir = project({ 'src/a.ts': "export function $$store() {}\nexport const $after = \"$'\";\n" });
     git(dir, 'init', '-q', '-b', 'main');

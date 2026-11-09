@@ -8,14 +8,11 @@ It runs on your machine. Your code stays there.
 
 ## Try it
 
-You need Node.js 20 or newer. TSight isn't on npm, so run it from a clone:
+You need Node.js 20 or newer and git.
 
 ```bash
-git clone https://github.com/challaravinath/TSight.git
-cd TSight
-npm install
-npm run build
-npm run tsight -- /path/to/your/project
+npm install -g tsight
+tsight /path/to/your/project
 ```
 
 Your browser opens with the analysis.
