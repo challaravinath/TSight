@@ -178,7 +178,7 @@ TSight needs the history back to where the branch split off, and the authors of 
 - In `.vue`, `.svelte` and `.astro` files it reads only the script part. Something used only in the template isn't seen.
 - It doesn't see files generated at build time, such as a Prisma client. Imports of them show as unresolved.
 - It doesn't read the JSDoc `@import` tag.
-- It doesn't support Salesforce Lightning Web Components (`c/...` imports) yet.
+- It doesn't support certain platform-specific or proprietary setups yet, such as Salesforce's c/... component imports.
 
 ## Docker
 
