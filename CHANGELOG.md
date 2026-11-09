@@ -2,6 +2,22 @@
 
 All notable changes to TSight. Versions follow [semantic versioning](https://semver.org): a change to the snapshot format or the command line options that breaks existing use goes in a new major version.
 
+## Unreleased
+
+### Changed
+- The copyright line in LICENSE names Challa Ravindranath.
+- The install instructions use `npm install -g tsight`.
+
+### Fixed
+- The web UI build writes `THIRD-PARTY-NOTICES.txt` with the licenses of the libraries and fonts it bundles, and the `tsight` package includes it.
+- `tsight report` puts TSight's license and those notices in a comment inside the report file.
+
+## 3.0.3 (2026-11-09)
+
+### Changed
+- `tsight`, `@tsight/core` and `@tsight/api` are on npm. Install the command with `npm install -g tsight`.
+- `tsight` depends on `@tsight/core` and `@tsight/api` at `^3.0.3`.
+
 ## 3.0.2 (2026-10-28)
 
 ### Changed

@@ -1,6 +1,6 @@
 # Push a tag like v3.0.2 to make a release. A GitHub release is created with
 # notes from that version's section in CHANGELOG.md and a sample report attached.
-# TSight isn't published to npm.
+# This workflow doesn't publish the npm packages.
 #
 # A tag with a hyphen, like v3.0.2-rc.0, is a test release. The GitHub release
 # is marked as a pre-release.

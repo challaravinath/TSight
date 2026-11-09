@@ -11,7 +11,16 @@ It runs on your machine. Your code stays there.
 
 ## Quick start
 
-You need Node.js 20 or newer and git. TSight isn't on npm, so run it from a clone:
+You need Node.js 20 or newer and git.
+
+```bash
+npm install -g tsight
+tsight /path/to/your/project
+```
+
+The browser opens at http://localhost:4300 with the analysis.
+
+You can also run it from a clone:
 
 ```bash
 git clone https://github.com/challaravinath/TSight.git
@@ -21,9 +30,7 @@ npm run build
 npm run tsight -- /path/to/your/project
 ```
 
-The browser opens at http://localhost:4300 with the analysis.
-
-On Mac or Linux you can also run `./start.sh /path/to/your/project` from the clone, and on Windows `start.bat C:\path\to\project`. Both install, build and start in one go.
+From the clone, `./start.sh /path/to/your/project` on Mac or Linux, or `start.bat C:\path\to\project` on Windows, installs, builds and starts in one go.
 
 ## The command
 
