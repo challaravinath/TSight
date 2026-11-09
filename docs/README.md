@@ -9,6 +9,36 @@ It runs on your machine. Your code stays there.
 
 ![TSight overview](images/overview.png)
 
+## How it works
+
+```
+ your project folder
+        |
+        v
+ 1. Find files     what git tracks, or a walk that honours .gitignore
+        |
+        v
+ 2. Parse          every TypeScript and JavaScript file, and the code
+        |          inside .vue, .svelte and .astro files
+        v
+ 3. Extract        functions, classes, exports and every import
+        |
+        v
+ 4. Resolve        where each import points, the way TypeScript does it:
+        |          tsconfig paths, workspaces, framework aliases
+        v
+ 5. Work out       the import graph and its cycles, entry points, files
+        |          nothing imports, unused exports, complexity, duplicates
+        |
+        +--------  git history: commits, authors, files that change
+        |          often, files that change together
+        v
+ 6. One snapshot (JSON)  ->  the UI in your browser, tsight report,
+                             tsight analyze
+```
+
+Everything runs on your machine. The same map with file names, for contributors, is in [CONTRIBUTING.md](../CONTRIBUTING.md#where-things-live).
+
 ## Quick start
 
 You need Node.js 20 or newer and git.
