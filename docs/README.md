@@ -173,6 +173,12 @@ TSight needs the history back to where the branch split off, and the authors of 
 - It doesn't give a single health grade. You get the counts behind it instead.
 - It doesn't send your code anywhere.
 - It reads code, it doesn't run it. Anything decided at runtime, such as `import(someVariable)`, isn't followed.
+- It doesn't see files a tool or framework loads without an import, such as a path in a build script or a framework's own folder convention. Those can show up as "nothing imports" or as unused exports. List them under `entryPoints` in `tsight.config.json`.
+- It doesn't see code outside the project. If you publish a package, the code of the people who install it doesn't count as a use. Your package's public entry points count as used instead.
+- In `.vue`, `.svelte` and `.astro` files it reads only the script part. Something used only in the template isn't seen.
+- It doesn't see files generated at build time, such as a Prisma client. Imports of them show as unresolved.
+- It doesn't read the JSDoc `@import` tag.
+- It doesn't support Salesforce Lightning Web Components (`c/...` imports) yet.
 
 ## Docker
 
