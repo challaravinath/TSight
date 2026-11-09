@@ -166,7 +166,7 @@ describe('entry points and files without importers', () => {
     ]);
   });
 
-  it('reports unused exports by name, skipping files reached through export *', async () => {
+  it('reports unused exports by name, following export * and leaving out files nothing imports', async () => {
     const r = await analyzeProject(
       makeProject({
         'index.ts': "import { used } from './a';\nimport def from './b';\nexport const x = [used, def];\n",
@@ -177,7 +177,9 @@ describe('entry points and files without importers', () => {
       }),
     );
     const u = unusedExports(r).unusedExports.map((e) => `${e.file}:${e.name}`).sort();
-    expect(u).toEqual(['a.ts:notUsed', 'b.ts:alsoNotUsed', 'index.ts:x']);
+    // index.ts and barrel.ts are on the nothing-imports list, so their exports are not repeated here.
+    // Nothing imports reachedByStar through the barrel, so it is unused too.
+    expect(u).toEqual(['a.ts:notUsed', 'b.ts:alsoNotUsed', 'c.ts:reachedByStar']);
   });
 });
 

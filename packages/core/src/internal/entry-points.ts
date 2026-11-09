@@ -25,8 +25,17 @@ export function findEntryPoints(
 ): EntryPoint[] {
   const known = new Set(files.map((f) => f.path));
   const found = new Map<string, string>();
-  const add = (rel: string, reason: string) => {
-    if (known.has(rel) && !found.has(rel)) found.set(rel, reason);
+  // Files reached only through .d.ts targets; any other rule that matches later replaces it.
+  const typesOnly = new Set<string>();
+  const add = (rel: string, reason: string, onlyTypes = false) => {
+    if (!known.has(rel)) return;
+    if (!found.has(rel)) {
+      found.set(rel, reason);
+      if (onlyTypes) typesOnly.add(rel);
+    } else if (!onlyTypes && typesOnly.has(rel)) {
+      found.set(rel, reason);
+      typesOnly.delete(rel);
+    }
   };
   const addWithExtensions = (relNoExt: string, reason: string) => {
     for (const ext of CODE_EXTENSIONS) add(relNoExt + ext, reason);
@@ -81,6 +90,7 @@ export function findEntryPoints(
     if ('@sveltejs/kit' in deps) frameworks.add('sveltekit');
     if ('nuxt' in deps || 'nuxt3' in deps) frameworks.add('nuxt');
     if ('astro' in deps) frameworks.add('astro');
+    if ('@angular/core' in deps || '@angular/core' in ((pkg.peerDependencies as object) ?? {})) frameworks.add('angular');
     if (Object.keys(deps).some((d) => d.startsWith('@remix-run/') || d === '@react-router/dev')) frameworks.add('remix');
     for (const plugin of ['unplugin-vue-components', 'vite-plugin-pages', 'unplugin-vue-router', 'vite-plugin-vue-layouts', 'vite-plugin-vue-layouts-next']) {
       if (plugin in deps) frameworks.add(plugin);
@@ -112,11 +122,38 @@ export function findEntryPoints(
         continue;
       }
       // "./components/*": every file the pattern matches can be imported by other packages.
-      const pattern = join(v);
-      const [before, after] = [pattern.slice(0, pattern.indexOf('*')), pattern.slice(pattern.indexOf('*') + 1)];
-      for (const f of files) {
-        if (f.path.startsWith(before) && f.path.endsWith(after) && f.path.length >= before.length + after.length) {
-          add(f.path, `package.json "exports" pattern ${v}`);
+      // Patterns usually name built files ("./*.js", "./dist/types/x/*.d.ts"), so they are
+      // compared without extensions, and a build folder is traced back to the source:
+      // dist/x/* is src/x/*, and declaration output such as dist/types/element/src/*
+      // mirrors the source folders under the package, or under the folder that holds it.
+      const inPkg = v.replace(/^\.\//, '');
+      const star = inPkg.indexOf('*');
+      const head = inPkg.slice(0, star);
+      const tail = stripExt(inPkg.slice(star + 1));
+      const heads = [head];
+      const built = head.match(/^(dist|lib|build|out|esm|cjs)(-[a-z]+)?\/(.*)$/);
+      if (built) {
+        heads.push(`src/${built[3]}`);
+        const segs = built[3].split('/').filter(Boolean);
+        for (let k = 0; k < segs.length; k++) {
+          const rest = segs.slice(k).join('/') + '/';
+          heads.push(rest, `../${rest}`);
+        }
+        // dist/types/* with the source in src/: every folder after dist/ is build layout.
+        if (segs.length > 0) heads.push('src/');
+      }
+      // A pattern that names only .d.ts files makes the types public, not the values.
+      const onlyTypes = /\.d\.[cm]?ts$/.test(inPkg);
+      const pkgRel = relFrom(pkgDir, '.');
+      for (const h of heads) {
+        const joined = pkgRel ? `${pkgRel}/${h}` : h;
+        const prefix = joined === '' ? '' : path.posix.normalize(joined);
+        if (prefix.startsWith('..') || prefix === '.' || prefix === './') continue;
+        for (const f of files) {
+          const p = stripExt(f.path);
+          if (p.startsWith(prefix) && p.endsWith(tail) && p.length >= prefix.length + tail.length) {
+            add(f.path, `package.json "exports" pattern ${v}`, onlyTypes);
+          }
         }
       }
     }
@@ -260,7 +297,9 @@ export function findEntryPoints(
     }
   }
 
-  return Array.from(found, ([file, reason]) => ({ file, reason })).sort((a, b) => a.file.localeCompare(b.file));
+  return Array.from(found, ([file, reason]): EntryPoint => (typesOnly.has(file) ? { file, reason, typesOnly: true } : { file, reason })).sort((a, b) =>
+    a.file.localeCompare(b.file),
+  );
 }
 
 /**
@@ -280,6 +319,7 @@ const FRAMEWORK_FILES: Array<[string, Array<{ test: RegExp; reason: string }>]> 
     { test: /(^|\/)(app\/)?(app|error)\.vue$/, reason: 'Nuxt app file' },
     { test: /(^|\/)(app\/)?(pages|layouts|middleware|plugins)\//, reason: 'Nuxt file convention' },
     { test: /(^|\/)(app\/)?(components|composables|utils)\//, reason: 'Nuxt auto-import (no import statement to check)' },
+    { test: /(^|\/)shared\/(utils|types)\//, reason: 'Nuxt auto-import (no import statement to check)' },
     { test: /(^|\/)server\/(api|routes|middleware|plugins|utils)\//, reason: 'Nuxt server file convention' },
     { test: /(^|\/)(app\/)?app\.config\.[cm]?[jt]s$/, reason: 'Nuxt app config' },
     { test: /(^|\/)modules\/([^/]+|[^/]+\/index)\.[cm]?[jt]s$/, reason: 'Nuxt local module (loaded from modules/)' },
@@ -290,6 +330,8 @@ const FRAMEWORK_FILES: Array<[string, Array<{ test: RegExp; reason: string }>]> 
     { test: /(^|\/)src\/(content\/config|content\.config)\.[cm]?[jt]s$/, reason: 'Astro content config' },
     { test: /(^|\/)src\/actions\/index\.[cm]?[jt]s$/, reason: 'Astro actions' },
   ]],
+  // The entry file `ng generate library` creates; ng-packagr builds the package from it.
+  ['angular', [{ test: /(^|\/)public[-_]api\.ts$/, reason: 'Angular library public API (public-api.ts)' }]],
   ['unplugin-vue-components', [
     { test: /(^|\/)src\/components\/.+\.(vue|[cm]?[jt]sx?)$/, reason: 'auto-imported by unplugin-vue-components (no import statement to check)' },
   ]],

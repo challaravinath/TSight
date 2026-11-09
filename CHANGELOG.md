@@ -2,15 +2,26 @@
 
 All notable changes to TSight. Versions follow [semantic versioning](https://semver.org): a change to the snapshot format or the command line options that breaks existing use goes in a new major version.
 
-## Unreleased
+## 3.1.0 (2026-11-09)
+
+### New
+- Unused exports: exports no file in the project imports, followed through files that re-export them and through `export *`. Exports only tests use are listed separately. Shown on the overview and on each file's page, and in `tsight analyze` as `unusedExports`.
+- `.vue`, `.svelte` and `.astro` files are read, and their imports count.
+- More entry points: `angular.json`, SvelteKit, Nuxt, Astro and Remix conventions, Vue Router file routing, unplugin-vue-components and unplugin-auto-import, imports in MDX and Markdown pages, inline module scripts in HTML, `*` patterns in package.json `exports`, benchmark files, and paths named in tool configs.
 
 ### Changed
 - The copyright line in LICENSE names Challa Ravindranath.
 - The install instructions use `npm install -g tsight`.
+- The "Files nothing imports" panel and list say that files a tool or framework loads without an import can't be seen, and the panel is no longer green. Entry points that are public only through `.d.ts` files are marked "types only".
 
 ### Fixed
 - The web UI build writes `THIRD-PARTY-NOTICES.txt` with the licenses of the libraries and fonts it bundles, and the `tsight` package includes it.
 - `tsight report` puts TSight's license and those notices in a comment inside the report file.
+- More imports resolve: `#name` imports from the `imports` field of package.json, imports of a `dist/` folder that hasn't been built (mapped to the matching file under `src/` or `src/lib/`), and workspace imports of hand-written `.d.ts` files.
+- More files count as entry points: files matched by a package.json `exports` pattern that names built files (`"./*": "./*.js"`, `"./*": { "types": "./dist/types/*.d.ts" }`), `public-api.ts` in Angular libraries, and Nuxt's auto-imported `shared/utils/` and `shared/types/` folders.
+- More uses are seen: `import('./x').Type` in JSDoc comments of JavaScript files, and imports in hand-written `.d.ts` files (outside build folders). `import('./x').Type` now counts as using `Type` only, not every export of the file.
+- Projects with a very long git history (100,000+ commits) no longer run out of memory while working out which files change together.
+- Very large projects (15,000+ files) no longer crash while finding functions: a cache kept an entry for every syntax node.
 
 ## 3.0.3 (2026-11-09)
 

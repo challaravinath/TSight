@@ -19,6 +19,8 @@ export function findFilesWithoutImporters(
   graph: DependencyGraph,
   entryPoints: EntryPoint[],
   resolution: ResolutionStats,
+  /** Files a hand-written .d.ts imports from: used, though no analyzed file imports them. */
+  usedByDeclarations: Set<string> = new Set(),
 ): CodeIssue[] {
   const importers = reverseEdges(graph);
   const entries = new Set(entryPoints.map((e) => e.file));
@@ -29,7 +31,7 @@ export function findFilesWithoutImporters(
 
   const issues: CodeIssue[] = [];
   for (const file of files) {
-    if (file.role !== 'source' || entries.has(file.path)) continue;
+    if (file.role !== 'source' || entries.has(file.path) || usedByDeclarations.has(file.path)) continue;
     const from = importers.get(file.path);
     if (from && from.size > 0) {
       const sourceImporters = Array.from(from).filter((f) => !isTestPath(files, f));

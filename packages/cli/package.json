@@ -1,6 +1,6 @@
 {
   "name": "tsight",
-  "version": "3.0.3",
+  "version": "3.1.0",
   "description": "Understand any TypeScript codebase in 30 seconds. No AI. No guessing. Just facts from your code.",
   "type": "module",
   "bin": {

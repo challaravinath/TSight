@@ -145,13 +145,12 @@ main.page { padding-top: 32px; padding-bottom: 64px; display: flex; flex-directi
 .answer h2 { font-size: 15px; font-weight: 600; color: var(--ink-2); }
 .answer.risk h2 { color: var(--risk-ink); }
 .answer.people h2 { color: var(--people); }
-.answer.safe h2 { color: var(--safe); }
+.answer.unused .formula { background: var(--sunk); }
 .answer .big { font-size: 34px; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; }
 .answer .big small { font-size: 17px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; }
 .answer .formula { border-radius: 8px; padding: 10px 12px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: baseline; }
 .answer.risk .formula { background: var(--risk-wash); }
 .answer.people .formula { background: var(--people-wash); }
-.answer.safe .formula { background: var(--safe-wash); }
 .answer .next { font-size: 13px; color: var(--ink-2); border-top: 1px solid var(--line-soft); padding-top: 12px; }
 
 /* segmented control */

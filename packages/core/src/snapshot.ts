@@ -69,6 +69,9 @@ export interface Snapshot {
   twins: StructuralTwin[];
   twinStats: { functionsCompared: number; pairsFound: number };
   noImporters: Array<{ file: number; onlyTests: boolean }>;
+  /** Exports no file uses. Files in noImporters are not repeated here. */
+  unusedExports: Array<{ file: number; name: string; line: number; kind: 'value' | 'type'; onlyTests: boolean }>;
+  exportStats: { totalExports: number; filesUsedAsAWhole: number };
   git: null | {
     shallow: boolean;
     renamesFollowed: boolean;
@@ -164,6 +167,8 @@ export function buildSnapshot(
     noImporters: result.issues
       .filter((i) => i.type === 'dead-code')
       .map((i) => ({ file: idx(i.file), onlyTests: i.message.startsWith('Only imported by tests') })),
+    unusedExports: result.unusedExports.map((u) => ({ ...u, file: idx(u.file) })),
+    exportStats: result.exportStats,
     git: null,
   };
 

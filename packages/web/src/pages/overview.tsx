@@ -36,7 +36,7 @@ export function Overview({ m }: { m: Model }) {
       <section className="grid-3" aria-label="Summary">
         <RiskAnswer m={m} />
         <PeopleAnswer m={m} />
-        <SafeAnswer m={m} />
+        <UnusedAnswer m={m} />
       </section>
 
       <div className="row">
@@ -254,11 +254,12 @@ function PeopleAnswer({ m }: { m: Model }) {
   );
 }
 
-function SafeAnswer({ m }: { m: Model }) {
+function UnusedAnswer({ m }: { m: Model }) {
   const none = m.s.noImporters.filter((x) => !x.onlyTests).length;
   const tests = m.s.noImporters.length - none;
+  const exportsUnused = (m.s.unusedExports ?? []).filter((u) => !u.onlyTests).length;
   return (
-    <div className="panel answer safe">
+    <div className="panel answer unused">
       <h2>Files nothing imports</h2>
       <div className="big">
         <Proof of={() => P.noImporters(m, false)}>{fmt(none)}</Proof> <small>{none === 1 ? 'source file' : 'source files'}</small>
@@ -266,7 +267,7 @@ function SafeAnswer({ m }: { m: Model }) {
       <div className="formula">
         <span>
           No import and no entry-point rule points at them. <Proof of={() => P.unresolved(m)}>{m.s.resolution.percentResolved}%</Proof> of
-          project imports resolved, so check before deleting.
+          project imports resolved, and files a tool or framework loads without an import can't be seen, so check before deleting.
         </span>
       </div>
       <div className="next">
@@ -275,6 +276,14 @@ function SafeAnswer({ m }: { m: Model }) {
         ) : (
           <>
             <Proof of={() => P.noImporters(m, true)}>{plural(tests, 'more file')}</Proof> {tests === 1 ? 'is' : 'are'} only imported by tests.
+          </>
+        )}{' '}
+        {exportsUnused === 0 ? (
+          'Every export in the other files is imported somewhere in the project.'
+        ) : (
+          <>
+            In the other files, <Proof of={() => P.unusedExports(m, false)}>{plural(exportsUnused, 'export')}</Proof> {exportsUnused === 1 ? 'is' : 'are'} not
+            imported by any file in the project.
           </>
         )}
       </div>

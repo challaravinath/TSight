@@ -183,10 +183,33 @@ export function noImporters(m: Model, onlyTests: boolean): Evidence {
           ? 'The only files importing these are tests.'
           : 'No project file imports these, and no entry-point rule matches them (package.json fields, bin, exports, scripts, framework conventions, config files, tsight.config.json).'}{' '}
         {m.s.resolution.percentResolved}% of project imports resolved, so check the {plural(m.s.resolution.unresolved, 'unresolved import')} before deleting
-        anything.
+        anything. Files a tool or framework loads without an import, such as a path in a build script, can't be seen here; list them under{' '}
+        <code>entryPoints</code> in <code>tsight.config.json</code>.
       </span>
     ),
     items: rows.map((x) => fileItem(m, x.file, { sub: `${plural(m.files[x.file].lines, 'line')}` })),
+  };
+}
+
+export function unusedExports(m: Model, onlyTests: boolean, file?: number): Evidence {
+  const rows = (m.s.unusedExports ?? [])
+    .filter((u) => u.onlyTests === onlyTests && (file === undefined || u.file === file))
+    .sort((a, b) => p(m, a.file).localeCompare(p(m, b.file)) || a.line - b.line);
+  return {
+    kind: onlyTests ? 'Exports only tests use' : 'Unused exports',
+    title: onlyTests ? 'Exports only test files use' : 'Exports no file imports',
+    definition: (
+      <span>
+        {onlyTests ? 'Only test files import these names. ' : 'No file in the project imports these names, directly or through a file that re-exports them. '}
+        An entry point, <code>import *</code>, <code>import()</code> or <code>require()</code> counts as using every export of a file. Files nothing imports
+        are not repeated here. An export used only inside its own file is listed too: it works without the <code>export</code>. Code outside this project,
+        and names a tool or framework loads without an import, can't be seen here, so check before you delete. Files loaded that way can be listed under{' '}
+        <code>entryPoints</code> in <code>tsight.config.json</code>.
+      </span>
+    ),
+    items: rows.map((u) =>
+      fileItem(m, u.file, { key: `${u.file}:${u.name}:${u.line}`, right: `line ${u.line}`, code: `${u.kind === 'type' ? 'type ' : ''}${u.name}` }),
+    ),
   };
 }
 
@@ -312,10 +335,16 @@ export function entryPoints(m: Model, reason?: string): Evidence {
     definition: (
       <span>
         Files that are run or loaded by something other than an import: package.json fields, scripts, HTML pages, framework conventions,
-        config files and the entryPoints list in tsight.config.json. They never count as unused.
+        config files and the entryPoints list in tsight.config.json. They never count as files nothing imports, and their exports count as used.
+        Files marked "types only" are public through .d.ts files alone, so only their types count as used.
       </span>
     ),
-    items: rows.map((e) => ({ key: e.file, label: e.file, href: m.byPath.has(e.file) ? to.file(e.file) : undefined, right: reason ? undefined : e.reason })),
+    items: rows.map((e) => ({
+      key: e.file,
+      label: e.file,
+      href: m.byPath.has(e.file) ? to.file(e.file) : undefined,
+      right: reason ? (e.typesOnly ? 'types only' : undefined) : `${e.reason}${e.typesOnly ? ' (types only)' : ''}`,
+    })),
   };
 }
 
@@ -323,7 +352,7 @@ export function sourceFiles(m: Model): Evidence {
   return {
     kind: 'Source files',
     title: 'Source files analyzed',
-    definition: <span>TypeScript and JavaScript files tracked by git (or not ignored), without declaration files and tests.</span>,
+    definition: <span>TypeScript, JavaScript, Vue, Svelte and Astro files tracked by git (or not ignored), without declaration files and tests.</span>,
     items: [...m.sourceIdx].sort((a, b) => p(m, a).localeCompare(p(m, b))).map((i) => fileItem(m, i, { right: fmt(m.files[i].lines) })),
   };
 }
